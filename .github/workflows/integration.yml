@@ -1,0 +1,112 @@
+name: Integration
+
+# Boots a Postgres + Archive-Node-API server seeded with the static
+# tests/integration/fixtures/archive_db.sql fixture, then runs the SDK's
+# integration tests against it.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'schema.graphql'
+      - '.github/workflows/integration.yml'
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  ARCHIVE_NODE_API_REPO: o1-labs/Archive-Node-API
+  ARCHIVE_NODE_API_REF: main
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:13-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout SDK
+        uses: actions/checkout@v4
+        with:
+          path: sdk
+
+      - name: Checkout Archive-Node-API
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ARCHIVE_NODE_API_REPO }}
+          ref: ${{ env.ARCHIVE_NODE_API_REF }}
+          path: archive-node-api
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: sdk/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.0'
+          cache: 'npm'
+          cache-dependency-path: archive-node-api/package-lock.json
+
+      - name: Load fixture into Postgres
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -c 'CREATE DATABASE archive_test;'
+          psql -h localhost -U postgres -d archive_test \
+            -f archive-node-api/tests/integration/fixtures/archive_db.sql
+
+      - name: Build and start Archive-Node-API
+        working-directory: archive-node-api
+        env:
+          PG_CONN: postgres://postgres:postgres@localhost:5432/archive_test
+          PORT: '8080'
+        run: |
+          npm ci
+          npm run build
+          nohup npm run start > server.log 2>&1 &
+          echo $! > server.pid
+          disown
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8080/healthcheck >/dev/null; then
+              echo "server is up"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run SDK integration tests
+        working-directory: sdk
+        env:
+          ARCHIVE_GRAPHQL_URI: http://localhost:8080/
+        run: go test -v -run TestIntegration ./...
+
+      - name: Stop server
+        if: always()
+        working-directory: archive-node-api
+        run: |
+          if [ -f server.pid ]; then kill "$(cat server.pid)" 2>/dev/null || true; fi
+
+      - name: Upload server log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-node-api-server-log
+          path: archive-node-api/server.log
+          if-no-files-found: ignore

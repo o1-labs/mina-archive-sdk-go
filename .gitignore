@@ -1,0 +1,9 @@
+*.test
+*.out
+*.log
+.env
+.env.local
+.DS_Store
+coverage.txt
+coverage.out
+vendor/

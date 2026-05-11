@@ -1,0 +1,19 @@
+name: Schema Drift
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'  # Mondays 13:00 UTC
+  pull_request:
+    paths:
+      - 'schema.graphql'
+      - 'scripts/check_schema_drift.sh'
+      - '.github/workflows/schema-drift.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare schema against upstream
+        run: bash scripts/check_schema_drift.sh

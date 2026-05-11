@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ['1.21', '1.22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - run: go mod tidy
+      - run: |
+          if [ -n "$(git status --porcelain go.mod go.sum 2>/dev/null)" ]; then
+            echo "go.mod / go.sum out of date — please run 'go mod tidy'."
+            git diff go.mod go.sum
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race -count=1 ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59
