@@ -28,11 +28,11 @@ const (
 //
 // Use zero/nil values to omit a field — only Address is required.
 type EventFilterOptionsInput struct {
-	Address string             // required
-	TokenID string             // optional
-	Status  BlockStatusFilter  // optional ("" = server default)
-	From    *int               // optional, inclusive
-	To      *int               // optional, exclusive
+	Address string            // required
+	TokenID string            // optional
+	Status  BlockStatusFilter // optional ("" = server default)
+	From    *int              // optional, inclusive
+	To      *int              // optional, exclusive
 }
 
 // ActionFilterOptionsInput filters actions from a specific account.
@@ -48,10 +48,10 @@ type ActionFilterOptionsInput struct {
 
 // BlockQueryInput filters blocks by height, date, or canonical status.
 type BlockQueryInput struct {
-	BlockHeightGte *int    // inclusive
-	BlockHeightLt  *int    // exclusive
-	DateTimeGte    string  // ISO-8601
-	DateTimeLt     string  // ISO-8601
+	BlockHeightGte *int   // inclusive
+	BlockHeightLt  *int   // exclusive
+	DateTimeGte    string // ISO-8601
+	DateTimeLt     string // ISO-8601
 	Canonical      *bool
 	InBestChain    *bool
 }
