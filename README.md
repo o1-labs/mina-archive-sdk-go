@@ -115,6 +115,18 @@ See `examples/`:
 - `blocks/` — get the latest canonical blocks with currency parsing
 - `networkstate/` — check archive sync state
 
+## Version compatibility
+
+This SDK versions in lockstep with the [Archive-Node-API](https://github.com/o1-labs/Archive-Node-API) schema it speaks.
+
+| Part | Meaning |
+| --- | --- |
+| **Major** | The schema major version. A breaking schema change moves both. |
+| **Minor** | The schema minor version. A new query or argument moves both. |
+| **Patch** | SDK-only changes — fixes, docs, dependencies. Independent of the server. |
+
+So an SDK on `1.0.x` speaks the `1.0.x` schema, and matching the first two numbers is the whole compatibility check. The schema is additive within a major version, so an older SDK keeps working against a newer server; it simply cannot reach what was added after it.
+
 ## Development
 
 ```sh
