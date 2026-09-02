@@ -276,6 +276,26 @@ func (c *Client) GetBlocks(ctx context.Context, opts BlocksOptions) ([]Block, er
 	return *result.Blocks, nil
 }
 
+// GetVerificationKeyUpdates finds applied account updates that set the given
+// verification key. The block range is required and the server caps its width,
+// so walk a wide history in pages rather than in one call.
+func (c *Client) GetVerificationKeyUpdates(ctx context.Context, in VerificationKeyUpdateFilterInput) ([]VerificationKeyUpdate, error) {
+	data, err := c.ExecuteQuery(ctx, queryVerificationKeyUpdates, map[string]any{"input": in.toMap()}, "GetVerificationKeyUpdates")
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		VerificationKeyUpdates *[]VerificationKeyUpdate `json:"verificationKeyUpdates"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("decode GetVerificationKeyUpdates: %w", err)
+	}
+	if result.VerificationKeyUpdates == nil {
+		return nil, &MissingFieldError{QueryName: "GetVerificationKeyUpdates", Field: "verificationKeyUpdates"}
+	}
+	return *result.VerificationKeyUpdates, nil
+}
+
 // IntPtr / BoolPtr are convenience helpers for the optional pointer fields
 // on filter structs. They avoid the `x := 5; &x` ceremony in call sites.
 func IntPtr(v int) *int    { return &v }

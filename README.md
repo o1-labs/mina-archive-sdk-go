@@ -51,6 +51,7 @@ Each method on `*Client` maps 1:1 to a GraphQL query in the [Archive-Node-API sc
 | `GetActions(ctx, input)` | `[]ActionOutput` | Actions dispatched from a zkApp account. |
 | `GetNetworkState(ctx)` | `*NetworkStateOutput` | Archive's max canonical / pending block heights. |
 | `GetBlocks(ctx, opts)` | `[]Block` | Blocks filtered by height/date range and chain status, with full transaction detail. |
+| `GetVerificationKeyUpdates(ctx, in)` | `[]VerificationKeyUpdate` | Applied account updates that set a given verification key, within a required block range. |
 | `ExecuteQuery(ctx, gql, vars, name)` | `json.RawMessage` | Low-level escape hatch returning the raw `data` field. |
 
 ### Configuration

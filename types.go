@@ -46,6 +46,19 @@ type ActionFilterOptionsInput struct {
 	EndActionState  string
 }
 
+// VerificationKeyUpdateFilterInput filters applied account updates that set a
+// verification key.
+//
+// Unlike the event and action filters, the block range is required: the server
+// bounds the span by its configured BLOCK_RANGE_SIZE. From is inclusive and To
+// is exclusive.
+type VerificationKeyUpdateFilterInput struct {
+	VerificationKeyHash string            // required
+	From                int               // required, inclusive
+	To                  int               // required, exclusive
+	Status              BlockStatusFilter // optional ("" = server default)
+}
+
 // BlockQueryInput filters blocks by height, date, or canonical status.
 type BlockQueryInput struct {
 	BlockHeightGte *int   // inclusive
@@ -54,6 +67,17 @@ type BlockQueryInput struct {
 	DateTimeLt     string // ISO-8601
 	Canonical      *bool
 	InBestChain    *bool
+}
+
+// VerificationKeyUpdate is an applied account update that set a verification key.
+type VerificationKeyUpdate struct {
+	AccountUpdateID string `json:"accountUpdateId"`
+	// Address is the account whose verification key was set.
+	Address             string          `json:"address"`
+	TokenID             string          `json:"tokenId"`
+	VerificationKeyHash string          `json:"verificationKeyHash"`
+	BlockInfo           BlockInfo       `json:"blockInfo"`
+	TransactionInfo     TransactionInfo `json:"transactionInfo"`
 }
 
 // TransactionInfo describes the transaction that emitted an event/action.
@@ -217,6 +241,18 @@ func (in ActionFilterOptionsInput) toMap() map[string]any {
 	}
 	if in.EndActionState != "" {
 		m["endActionState"] = in.EndActionState
+	}
+	return m
+}
+
+func (in VerificationKeyUpdateFilterInput) toMap() map[string]any {
+	m := map[string]any{
+		"verificationKeyHash": in.VerificationKeyHash,
+		"from":                in.From,
+		"to":                  in.To,
+	}
+	if in.Status != "" {
+		m["status"] = string(in.Status)
 	}
 	return m
 }

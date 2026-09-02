@@ -10,6 +10,10 @@ import (
 
 const fixtureAddress = "B62qiaEMrWiYdK7LcJ2ScdMyG8LzUxi7yaw17XvBD34on7UKfhAkRML"
 
+// fixtureVerificationKeyHash is the single verification key in the upstream
+// sample archive dump.
+const fixtureVerificationKeyHash = "330109536550383627416201330124291596191867681867265169258470531313815097966"
+
 // TestIntegration runs only when ARCHIVE_GRAPHQL_URI is set, pointing at a
 // live Archive-Node-API server (CI provisions one in .github/workflows/
 // integration.yml, backed by the static fixture from o1-labs/Archive-Node-API).
@@ -72,6 +76,25 @@ func TestIntegration(t *testing.T) {
 		}
 		if actions == nil {
 			t.Error("actions slice should be non-nil")
+		}
+	})
+
+	t.Run("VerificationKeyUpdates", func(t *testing.T) {
+		updates, err := client.GetVerificationKeyUpdates(ctx, VerificationKeyUpdateFilterInput{
+			VerificationKeyHash: fixtureVerificationKeyHash,
+			From:                1,
+			To:                  1000,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updates == nil {
+			t.Error("updates slice should be non-nil even when empty")
+		}
+		for _, u := range updates {
+			if u.VerificationKeyHash != fixtureVerificationKeyHash {
+				t.Errorf("verificationKeyHash = %q, want the requested key", u.VerificationKeyHash)
+			}
 		}
 	})
 
