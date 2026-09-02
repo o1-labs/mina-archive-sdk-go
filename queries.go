@@ -129,3 +129,33 @@ query GetBlocks($query: BlockQueryInput, $limit: Int, $sortBy: BlockSortByInput)
   }
 }
 `
+
+const queryVerificationKeyUpdates = `
+query GetVerificationKeyUpdates($input: VerificationKeyUpdateFilterInput!) {
+  verificationKeyUpdates(input: $input) {
+    accountUpdateId
+    address
+    tokenId
+    verificationKeyHash
+    blockInfo {
+      height
+      stateHash
+      parentHash
+      ledgerHash
+      chainStatus
+      timestamp
+      globalSlotSinceHardfork
+      globalSlotSinceGenesis
+      distanceFromMaxBlockHeight
+    }
+    transactionInfo {
+      status
+      hash
+      memo
+      authorizationKind
+      sequenceNumber
+      zkappAccountUpdateIds
+    }
+  }
+}
+`

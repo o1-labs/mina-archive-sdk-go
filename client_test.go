@@ -138,6 +138,95 @@ func TestGetBlocksPassesOptionalFiltersAsNull(t *testing.T) {
 	}
 }
 
+func TestGetVerificationKeyUpdatesHappyPath(t *testing.T) {
+	srv := httptest.NewServer(graphqlOK(map[string]any{
+		"verificationKeyUpdates": []any{
+			map[string]any{
+				"accountUpdateId":     "42",
+				"address":             "B62qtest",
+				"tokenId":             "wSHV2S4qX9jFsLjQo8r1BsMLH2ZRKsZx6EJd1sbozGPieEC4Jf",
+				"verificationKeyHash": "3301095365503836274162013301242915961918676818672",
+				"blockInfo": map[string]any{
+					"height":                     100,
+					"stateHash":                  "sh",
+					"parentHash":                 "ph",
+					"ledgerHash":                 "lh",
+					"chainStatus":                "canonical",
+					"timestamp":                  "0",
+					"globalSlotSinceHardfork":    0,
+					"globalSlotSinceGenesis":     0,
+					"distanceFromMaxBlockHeight": 1,
+				},
+				"transactionInfo": map[string]any{
+					"status":                "applied",
+					"hash":                  "txhash",
+					"memo":                  "",
+					"authorizationKind":     "Proof",
+					"sequenceNumber":        0,
+					"zkappAccountUpdateIds": []any{42},
+				},
+			},
+		},
+	}))
+	defer srv.Close()
+	client := newTestClient(t, srv)
+
+	updates, err := client.GetVerificationKeyUpdates(context.Background(), VerificationKeyUpdateFilterInput{
+		VerificationKeyHash: "3301095365503836274162013301242915961918676818672",
+		From:                1,
+		To:                  1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("len(updates) = %d, want 1", len(updates))
+	}
+	if updates[0].Address != "B62qtest" {
+		t.Errorf("address = %q", updates[0].Address)
+	}
+	if updates[0].BlockInfo.Height != 100 {
+		t.Errorf("height = %d", updates[0].BlockInfo.Height)
+	}
+}
+
+func TestVerificationKeyFilterSendsRequiredRange(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body graphqlRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		captured = body.Variables
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"verificationKeyUpdates": []any{}},
+		})
+	}))
+	defer srv.Close()
+	client := newTestClient(t, srv)
+
+	if _, err := client.GetVerificationKeyUpdates(context.Background(), VerificationKeyUpdateFilterInput{
+		VerificationKeyHash: "vk",
+		From:                10,
+		To:                  20,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input, ok := captured["input"].(map[string]any)
+	if !ok {
+		t.Fatalf("input variable missing or not an object: %v", captured)
+	}
+	if input["verificationKeyHash"] != "vk" {
+		t.Errorf("verificationKeyHash = %v", input["verificationKeyHash"])
+	}
+	// The range is required, so it is sent even at the zero value of Status.
+	if input["from"] != float64(10) || input["to"] != float64(20) {
+		t.Errorf("range = %v..%v, want 10..20", input["from"], input["to"])
+	}
+	if _, present := input["status"]; present {
+		t.Error("status should be omitted when unset")
+	}
+}
+
 func TestGraphQLErrorIsNotRetried(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
