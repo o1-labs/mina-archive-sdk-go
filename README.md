@@ -1,5 +1,10 @@
 # mina-archive-sdk-go
 
+[![CI](https://github.com/o1-labs/mina-archive-sdk-go/actions/workflows/ci.yml/badge.svg)](https://github.com/o1-labs/mina-archive-sdk-go/actions/workflows/ci.yml)
+[![Go reference](https://pkg.go.dev/badge/github.com/o1-labs/mina-archive-sdk-go.svg)](https://pkg.go.dev/github.com/o1-labs/mina-archive-sdk-go)
+[![release](https://img.shields.io/github/v/tag/o1-labs/mina-archive-sdk-go?label=release&sort=semver&logo=go)](https://github.com/o1-labs/mina-archive-sdk-go/releases)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
+
 Go SDK for [Mina Protocol's Archive Node](https://github.com/o1-labs/Archive-Node-API) GraphQL endpoint.
 
 Companion to the daemon-targeting [`MinaProtocol/mina-sdk-go`](https://github.com/MinaProtocol/mina-sdk-go) / [`mina-sdk-rust`](https://github.com/MinaProtocol/mina-sdk-rust) / [`mina-sdk-python`](https://github.com/MinaProtocol/mina-sdk-python). This SDK targets the separate **archive** endpoint defined by `o1-labs/Archive-Node-API` (events, actions, blocks, network state).
