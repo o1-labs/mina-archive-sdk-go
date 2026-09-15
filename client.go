@@ -34,14 +34,29 @@ func WithRetryDelay(d time.Duration) ClientOption {
 }
 
 // WithTimeout sets the per-request HTTP timeout.
+//
+// The timeout is applied per request with context.WithTimeout, never by
+// writing to the *http.Client. That matters because WithHTTPClient invites
+// callers to share a connection pool: writing Timeout into a shared client
+// would overwrite the other user's setting, leak into unrelated traffic in the
+// same process, and race if two Clients were constructed concurrently.
+//
+// As a result this option behaves identically whichever order it is combined
+// with WithHTTPClient in.
 func WithTimeout(d time.Duration) ClientOption {
-	return func(c *Client) { c.httpClient.Timeout = d }
+	return func(c *Client) { c.timeout = d }
 }
 
 // WithHTTPClient supplies a custom *http.Client (replaces the default).
 // Useful for tests and for sharing connection pools.
+//
+// The SDK treats the client as borrowed: it never writes to it, and Close does
+// not touch its idle connections.
 func WithHTTPClient(hc *http.Client) ClientOption {
-	return func(c *Client) { c.httpClient = hc }
+	return func(c *Client) {
+		c.httpClient = hc
+		c.ownsHTTPClient = false
+	}
 }
 
 // WithHeader attaches a header to every outgoing request. Repeat to add
@@ -65,9 +80,13 @@ type Client struct {
 	uri        string
 	retries    int
 	retryDelay time.Duration
+	timeout    time.Duration
 	headers    http.Header
 	httpClient *http.Client
-	logger     *log.Logger
+	// ownsHTTPClient is false once WithHTTPClient has supplied one, so the
+	// SDK knows not to write to or close an object it does not own.
+	ownsHTTPClient bool
+	logger         *log.Logger
 }
 
 // NewClient creates a Client with the given options. Sensible defaults: the
@@ -77,7 +96,11 @@ func NewClient(opts ...ClientOption) *Client {
 		uri:        DefaultGraphQLURI,
 		retries:    3,
 		retryDelay: 5 * time.Second,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		timeout:    30 * time.Second,
+		// No Timeout field here — the deadline is applied per request, so the
+		// behaviour is the same whether this client or the caller's is used.
+		httpClient:     &http.Client{},
+		ownsHTTPClient: true,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -89,8 +112,13 @@ func NewClient(opts ...ClientOption) *Client {
 }
 
 // Close releases idle connections held by the client's HTTP transport.
+//
+// It is a no-op when the *http.Client came from WithHTTPClient: that pool
+// belongs to the caller and may still be in use elsewhere.
 func (c *Client) Close() {
-	c.httpClient.CloseIdleConnections()
+	if c.ownsHTTPClient {
+		c.httpClient.CloseIdleConnections()
+	}
 }
 
 // GraphQLURI returns the configured endpoint URI.
@@ -111,8 +139,15 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 	for attempt := 1; attempt <= c.retries; attempt++ {
 		c.logf("GraphQL %s attempt %d/%d", queryName, attempt, c.retries)
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.uri, bytes.NewReader(payload))
+		reqCtx := ctx
+		cancel := context.CancelFunc(func() {})
+		if c.timeout > 0 {
+			reqCtx, cancel = context.WithTimeout(ctx, c.timeout)
+		}
+
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.uri, bytes.NewReader(payload))
 		if err != nil {
+			cancel()
 			return nil, fmt.Errorf("build request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -124,6 +159,7 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
+			cancel()
 			lastErr = err
 			c.logf("GraphQL %s transport error: %v", queryName, err)
 			if attempt < c.retries {
@@ -136,6 +172,9 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 
 		body, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		// The deadline covered the request and the body read; nothing below
+		// uses reqCtx, so release it here rather than deferring inside a loop.
+		cancel()
 		if readErr != nil {
 			lastErr = readErr
 			if attempt < c.retries {
