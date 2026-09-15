@@ -150,3 +150,76 @@ func TestNanominaString(t *testing.T) {
 		t.Errorf("got %q", c.NanominaString())
 	}
 }
+
+// CurrencyFromMina is documented to reject invalid input, but the no-decimal
+// branch multiplied without an overflow check (#10). "18446744074" wrapped to
+// 0.29 MINA and reported success, while a value one digit longer was correctly
+// rejected — so the failure was not even uniform.
+func TestCurrencyFromMinaOverflowBoundary(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantErr  bool
+		wantNano uint64
+	}{
+		{"0", false, 0},
+		{"1", false, 1_000_000_000},
+		// math.MaxUint64 / NanominaPerMina — the last value that fits.
+		{"18446744073", false, 18446744073_000000000},
+		// One more wrapped to 290448384 and reported success.
+		{"18446744074", true, 0},
+		{"18446744073709551615", true, 0},
+		{"99999999999999999999", true, 0},
+	}
+
+	for _, tc := range cases {
+		got, err := CurrencyFromMina(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("CurrencyFromMina(%q) = %d, want an error", tc.in, got.Nanomina())
+				continue
+			}
+			var invErr *InvalidCurrencyError
+			if !errors.As(err, &invErr) {
+				t.Errorf("CurrencyFromMina(%q) error = %T, want *InvalidCurrencyError", tc.in, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("CurrencyFromMina(%q) unexpected error: %v", tc.in, err)
+			continue
+		}
+		if got.Nanomina() != tc.wantNano {
+			t.Errorf("CurrencyFromMina(%q) = %d, want %d", tc.in, got.Nanomina(), tc.wantNano)
+		}
+	}
+}
+
+// The decimal branch was already safe; assert it stays that way and that the
+// boundary behaves identically with an explicit fractional part.
+func TestCurrencyFromMinaDecimalBoundary(t *testing.T) {
+	if _, err := CurrencyFromMina("18446744073.709551615"); err != nil {
+		t.Errorf("largest representable value should parse: %v", err)
+	}
+	if _, err := CurrencyFromMina("18446744073.709551616"); err == nil {
+		t.Error("one nanomina past the maximum should fail")
+	}
+}
+
+func TestCheckedMul(t *testing.T) {
+	max := CurrencyFromNanomina(^uint64(0))
+	if _, ok := max.CheckedMul(2); ok {
+		t.Error("CheckedMul(2) on MaxUint64 = ok, want overflow reported")
+	}
+	if c, ok := max.CheckedMul(1); !ok || c.Nanomina() != ^uint64(0) {
+		t.Errorf("CheckedMul(1) = (%d, %v), want (MaxUint64, true)", c.Nanomina(), ok)
+	}
+	if c, ok := max.CheckedMul(0); !ok || c.Nanomina() != 0 {
+		t.Errorf("CheckedMul(0) = (%d, %v), want (0, true)", c.Nanomina(), ok)
+	}
+	if c, ok := CurrencyFromNanomina(0).CheckedMul(^uint64(0)); !ok || c.Nanomina() != 0 {
+		t.Errorf("zero.CheckedMul(max) = (%d, %v), want (0, true)", c.Nanomina(), ok)
+	}
+	if c, ok := CurrencyFromNanomina(3).CheckedMul(4); !ok || c.Nanomina() != 12 {
+		t.Errorf("3.CheckedMul(4) = (%d, %v), want (12, true)", c.Nanomina(), ok)
+	}
+}
