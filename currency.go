@@ -1,6 +1,7 @@
 package archive
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -114,8 +115,23 @@ func (c Currency) Sub(o Currency) (Currency, error) {
 }
 
 // Mul returns c * n.
+//
+// Like Add, this wraps silently on overflow. Use CheckedMul when n comes from
+// anywhere the value is not already bounded.
 func (c Currency) Mul(n uint64) Currency {
 	return Currency{nanomina: c.nanomina * n}
+}
+
+// CheckedMul returns c * n and reports whether the result fits in a uint64.
+// The Currency is zero when ok is false.
+func (c Currency) CheckedMul(n uint64) (Currency, bool) {
+	if c.nanomina == 0 || n == 0 {
+		return Currency{}, true
+	}
+	if c.nanomina > math.MaxUint64/n {
+		return Currency{}, false
+	}
+	return Currency{nanomina: c.nanomina * n}, true
 }
 
 func parseDecimal(s string) (uint64, error) {
@@ -133,6 +149,14 @@ func parseDecimal(s string) (uint64, error) {
 		whole, err := strconv.ParseUint(parts[0], 10, 64)
 		if err != nil {
 			return 0, &InvalidCurrencyError{Input: s, Reason: err.Error()}
+		}
+		// The multiply is the overflow point, not the parse. "18446744074"
+		// parses fine and then wraps to 0.29 MINA, reporting success from a
+		// function documented to reject invalid input. The decimal branch
+		// below is already safe because it lets ParseUint reject the combined
+		// string.
+		if whole > math.MaxUint64/NanominaPerMina {
+			return 0, &InvalidCurrencyError{Input: s, Reason: "value out of range"}
 		}
 		return whole * NanominaPerMina, nil
 	case 2:
