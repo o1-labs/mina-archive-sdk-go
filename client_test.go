@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -402,3 +403,104 @@ func TestHTTPErrorOnJSON404(t *testing.T) {
 		t.Errorf("StatusCode = %d, want 404", httpErr.StatusCode)
 	}
 }
+
+// WithTimeout used to do c.httpClient.Timeout = d, writing into whatever the
+// client currently pointed at — including an *http.Client the caller supplied
+// and may share across a connection pool (#11).
+func TestWithTimeoutDoesNotMutateCallerClient(t *testing.T) {
+	hc := &http.Client{}
+	client := NewClient(WithHTTPClient(hc), WithTimeout(5*time.Second))
+	defer client.Close()
+
+	if hc.Timeout != 0 {
+		t.Errorf("caller's http.Client.Timeout = %s, want 0 — the SDK must not write to it", hc.Timeout)
+	}
+}
+
+// Option order must not change the outcome. Before, one order silently
+// discarded WithTimeout and the other wrote through into the caller's object.
+func TestTimeoutOptionOrderIsIrrelevant(t *testing.T) {
+	hcA := &http.Client{}
+	hcB := &http.Client{}
+
+	a := NewClient(WithTimeout(5*time.Second), WithHTTPClient(hcA))
+	defer a.Close()
+	b := NewClient(WithHTTPClient(hcB), WithTimeout(5*time.Second))
+	defer b.Close()
+
+	if hcA.Timeout != 0 || hcB.Timeout != 0 {
+		t.Errorf("caller clients mutated: A=%s B=%s, want 0/0", hcA.Timeout, hcB.Timeout)
+	}
+	if a.timeout != b.timeout {
+		t.Errorf("option order changed the effective timeout: %s vs %s", a.timeout, b.timeout)
+	}
+	if a.timeout != 5*time.Second {
+		t.Errorf("effective timeout = %s, want 5s", a.timeout)
+	}
+}
+
+// The timeout must still actually apply — moving it off the http.Client must
+// not quietly disable it.
+func TestTimeoutStillAppliesPerRequest(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	hc := &http.Client{}
+	client := NewClient(
+		WithGraphQLURI(srv.URL),
+		WithHTTPClient(hc),
+		WithTimeout(100*time.Millisecond),
+		WithRetries(1),
+	)
+	defer client.Close()
+
+	start := time.Now()
+	_, err := client.GetNetworkState(context.Background())
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected the request to time out")
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("took %s — the per-request deadline does not appear to apply", elapsed)
+	}
+	if hc.Timeout != 0 {
+		t.Errorf("caller's client was mutated during the request: %s", hc.Timeout)
+	}
+}
+
+// Close must not reach into a pool the caller still owns.
+func TestCloseDoesNotTouchCallerPool(t *testing.T) {
+	hc := &http.Client{Transport: &countingTransport{}}
+	client := NewClient(WithHTTPClient(hc))
+	client.Close()
+
+	tr, ok := hc.Transport.(*countingTransport)
+	if !ok {
+		t.Fatal("unexpected transport")
+	}
+	if tr.closeIdleCalls != 0 {
+		t.Errorf("CloseIdleConnections called %d time(s) on a borrowed pool, want 0", tr.closeIdleCalls)
+	}
+
+	// The default client is ours, so closing it is still allowed.
+	own := NewClient()
+	own.Close()
+}
+
+type countingTransport struct {
+	closeIdleCalls int
+}
+
+func (t *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("not used")
+}
+
+func (t *countingTransport) CloseIdleConnections() { t.closeIdleCalls++ }
