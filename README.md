@@ -145,11 +145,17 @@ import "errors"
 
 _, err := client.GetEvents(ctx, ...)
 var gqlErr *archive.GraphQLError
+var rateErr *archive.RateLimitError
+var httpErr *archive.HTTPError
 var connErr *archive.ConnectionError
 var missErr *archive.MissingFieldError
 switch {
+case errors.As(err, &rateErr):
+    // Rate limited. rateErr.RetryAfter says how long to wait.
 case errors.As(err, &gqlErr):
     // Server-side validation, malformed query, etc. Not retried.
+case errors.As(err, &httpErr):
+    // A non-2xx that is not GraphQL-shaped — often a wrong URL path.
 case errors.As(err, &connErr):
     // Exhausted retries (network / 5xx). Inspect connErr.LastError.
 case errors.As(err, &missErr):
@@ -180,6 +186,22 @@ All of these arrive as **HTTP 200** with a populated `errors` array;
 `extensions["status"]` is a payload field, not the HTTP status. An empty `Code()`
 means no code was sent — the server masks unexpected errors, and those carry no
 `extensions` at all — not that nothing went wrong.
+
+#### Rate limiting
+
+Every GraphQL-level error from this API arrives as **HTTP 200** with a populated
+`errors` array, so HTTP 429 is the only non-200 it emits under normal operation. That
+makes it unusually informative: it unambiguously means "slow down", and it is the one
+case where retrying the identical request is correct.
+
+The client retries 429 automatically, waiting the interval named in `Retry-After`. If
+the retries run out it returns `*RateLimitError`, which carries `RetryAfter`, `Limit`
+and `Remaining` so a caller can schedule its own back-off. A 429 is never reported as a
+`*GraphQLError`.
+
+`RetryAfter` is zero when the server sent no usable header, and `Limit`/`Remaining` are
+`-1` when theirs were absent or malformed — so a missing header is distinguishable from
+a real zero.
 
 #### Partial results
 

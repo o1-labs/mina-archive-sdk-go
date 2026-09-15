@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // GraphQLError is returned when the server replies with a non-empty `errors`
@@ -134,6 +135,35 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d in %s: %s", e.StatusCode, e.QueryName, e.Body)
+}
+
+// RateLimitError is returned when the server's rate limiter rejects the
+// request with HTTP 429.
+//
+// This is the only non-200 the API emits under normal operation: every
+// GraphQL-level error arrives as HTTP 200 with a populated errors array. So
+// unlike most 4xx it unambiguously means "slow down", and it is the one case
+// where retrying the identical request is correct.
+//
+// RetryAfter is zero when the server sent no usable retry-after header, and
+// Limit/Remaining are -1 when their headers were absent or malformed.
+type RateLimitError struct {
+	QueryName  string
+	RetryAfter time.Duration
+	Limit      int
+	Remaining  int
+	Errors     []GraphQLErrorEntry
+}
+
+func (e *RateLimitError) Error() string {
+	msg := "rate limited"
+	if len(e.Errors) > 0 && e.Errors[0].Message != "" {
+		msg = e.Errors[0].Message
+	}
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("HTTP 429 in %s: %s (retry after %s)", e.QueryName, msg, e.RetryAfter)
+	}
+	return fmt.Sprintf("HTTP 429 in %s: %s", e.QueryName, msg)
 }
 
 // ConnectionError is returned when the client exhausts its retries against

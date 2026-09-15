@@ -631,3 +631,110 @@ func TestNullDataIsNotPartial(t *testing.T) {
 		t.Errorf("HasPartialData() = true for data:null, want false (Data=%s)", gqlErr.Data)
 	}
 }
+
+// The rate limiter answers before GraphQL runs, with a GraphQL-shaped body and
+// three headers (#5). It used to fall through to the "not retried — they are
+// deterministic" path and come back as a plain *GraphQLError, with the status,
+// all three headers and the RATE_LIMITED code unreachable.
+func TestRateLimitErrorCarriesHeaders(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "37")
+		w.Header().Set("X-RateLimit-Limit", "600")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"Too many requests. Please retry later.","extensions":{"code":"RATE_LIMITED"}}]}`))
+	}))
+	defer srv.Close()
+
+	// retries=1 so the call does not sleep through Retry-After.
+	client := newTestClient(t, srv, WithRetries(1))
+	defer client.Close()
+
+	_, err := client.GetNetworkState(context.Background())
+
+	var rateErr *RateLimitError
+	if !errors.As(err, &rateErr) {
+		t.Fatalf("expected *RateLimitError, got %T: %v", err, err)
+	}
+	if rateErr.RetryAfter != 37*time.Second {
+		t.Errorf("RetryAfter = %s, want 37s", rateErr.RetryAfter)
+	}
+	if rateErr.Limit != 600 {
+		t.Errorf("Limit = %d, want 600", rateErr.Limit)
+	}
+	if rateErr.Remaining != 0 {
+		t.Errorf("Remaining = %d, want 0", rateErr.Remaining)
+	}
+	if !strings.Contains(err.Error(), "429") {
+		t.Errorf("error should name the status: %q", err.Error())
+	}
+
+	// 429 must NOT be classified as a GraphQL error.
+	var gqlErr *GraphQLError
+	if errors.As(err, &gqlErr) {
+		t.Error("429 must not be reported as a *GraphQLError")
+	}
+}
+
+// 429 is the one status where retrying unchanged is correct, and Retry-After
+// is the server saying how long to wait.
+func TestRateLimitIsRetried(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"errors":[{"message":"Too many requests"}]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"networkState":{"maxBlockHeight":{"canonicalMaxBlockHeight":1000,"pendingMaxBlockHeight":1010}}}}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv, WithRetries(3))
+	defer client.Close()
+
+	state, err := client.GetNetworkState(context.Background())
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("calls = %d, want 2 (one 429 then one success)", calls)
+	}
+	if state.MaxBlockHeight == nil || state.MaxBlockHeight.CanonicalMaxBlockHeight != 1000 {
+		t.Errorf("unexpected state: %+v", state)
+	}
+}
+
+// Absent or malformed headers must not produce wrong numbers.
+func TestRateLimitErrorToleratesMissingHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "not-a-number")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`not json at all`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv, WithRetries(1))
+	defer client.Close()
+
+	_, err := client.GetNetworkState(context.Background())
+	var rateErr *RateLimitError
+	if !errors.As(err, &rateErr) {
+		t.Fatalf("expected *RateLimitError, got %T: %v", err, err)
+	}
+	if rateErr.RetryAfter != 0 {
+		t.Errorf("RetryAfter = %s, want 0 for an unparseable header", rateErr.RetryAfter)
+	}
+	if rateErr.Limit != -1 || rateErr.Remaining != -1 {
+		t.Errorf("Limit/Remaining = %d/%d, want -1/-1 when absent", rateErr.Limit, rateErr.Remaining)
+	}
+	if len(rateErr.Errors) != 0 {
+		t.Errorf("Errors = %v, want empty for a non-JSON body", rateErr.Errors)
+	}
+}
