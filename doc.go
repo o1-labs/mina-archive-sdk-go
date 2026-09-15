@@ -2,12 +2,14 @@
 // Node GraphQL API.
 //
 // The archive node indexes Mina blockchain history into a queryable
-// PostgreSQL store. This SDK exposes the four queries that the Archive-Node-API
+// PostgreSQL store. This SDK exposes the five queries that the Archive-Node-API
 // GraphQL server publishes:
 //
 //   - Events emitted by a zkApp account, filterable by block range and
 //     consensus status.
 //   - Actions dispatched from a zkApp account.
+//   - Verification-key updates — applied account updates that set a given
+//     verification key, within a required block range.
 //   - Block details including transactions, by height/date range.
 //   - Network state — the archive's max canonical and pending block heights.
 //
@@ -15,12 +17,13 @@
 // the base URL as-is — the SDK never appends a path, so a URL ending in
 // "/graphql" returns 404.
 //
-// Basic usage:
+// Basic usage — see ExampleClient_GetEvents in example_test.go, which is the
+// compiled source of this snippet:
 //
 //	client := archive.NewClient(archive.WithGraphQLURI("https://archive.example/"))
 //	defer client.Close()
 //
-//	events, err := client.GetEvents(archive.EventFilterOptionsInput{
+//	events, err := client.GetEvents(context.Background(), archive.EventFilterOptionsInput{
 //	    Address: "B62q...",
 //	    Status:  archive.BlockStatusCanonical,
 //	})
