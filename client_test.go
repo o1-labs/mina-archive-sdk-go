@@ -504,3 +504,72 @@ func (t *countingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 func (t *countingTransport) CloseIdleConnections() { t.closeIdleCalls++ }
+
+// The API publishes extensions.code as its contract discriminator and keeps
+// message text deliberately minimal (#4). All of it used to be dropped.
+func TestGraphQLErrorExposesExtensionsCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errors":[{"message":"m","extensions":{"code":"BLOCK_RANGE_ERROR","status":400},"path":["events"],"locations":[{"line":2,"column":3}]}],"data":null}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	defer client.Close()
+
+	_, err := client.GetEvents(context.Background(), EventFilterOptionsInput{Address: "B62q..."})
+	var gqlErr *GraphQLError
+	if !errors.As(err, &gqlErr) {
+		t.Fatalf("expected *GraphQLError, got %T: %v", err, err)
+	}
+	if got := gqlErr.Errors[0].Extensions["code"]; got != "BLOCK_RANGE_ERROR" {
+		t.Errorf(`Extensions["code"] = %v, want BLOCK_RANGE_ERROR`, got)
+	}
+	if !gqlErr.HasCode(CodeBlockRangeError) {
+		t.Error("HasCode(CodeBlockRangeError) = false, want true")
+	}
+	if gqlErr.HasCode(CodeRateLimited) {
+		t.Error("HasCode(CodeRateLimited) = true, want false")
+	}
+	if got := gqlErr.Code(); got != CodeBlockRangeError {
+		t.Errorf("Code() = %q, want %q", got, CodeBlockRangeError)
+	}
+	// extensions is kept whole, not flattened to just the code.
+	if got := gqlErr.Errors[0].Extensions["status"]; got != float64(400) {
+		t.Errorf(`Extensions["status"] = %v (%T), want 400`, got, got)
+	}
+	if len(gqlErr.Errors[0].Path) != 1 || gqlErr.Errors[0].Path[0] != "events" {
+		t.Errorf("Path = %v, want [events]", gqlErr.Errors[0].Path)
+	}
+	if len(gqlErr.Errors[0].Locations) != 1 || gqlErr.Errors[0].Locations[0].Line != 2 {
+		t.Errorf("Locations = %+v, want line 2", gqlErr.Errors[0].Locations)
+	}
+}
+
+// The server masks unexpected errors, so those arrive with a generic message
+// and no extensions at all. Code() must return "" and must not panic.
+func TestMaskedErrorHasNoCodeAndDoesNotPanic(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"errors":[{"message":"m"}],"data":null}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	defer client.Close()
+
+	_, err := client.GetEvents(context.Background(), EventFilterOptionsInput{Address: "B62q..."})
+	var gqlErr *GraphQLError
+	if !errors.As(err, &gqlErr) {
+		t.Fatalf("expected *GraphQLError, got %T: %v", err, err)
+	}
+	if got := gqlErr.Code(); got != "" {
+		t.Errorf("Code() = %q, want empty", got)
+	}
+	if got := gqlErr.Errors[0].Code(); got != "" {
+		t.Errorf("entry Code() = %q, want empty", got)
+	}
+	if gqlErr.Codes() != nil {
+		t.Errorf("Codes() = %v, want nil", gqlErr.Codes())
+	}
+}

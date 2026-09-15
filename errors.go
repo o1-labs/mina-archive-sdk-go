@@ -12,9 +12,85 @@ type GraphQLError struct {
 	Errors    []GraphQLErrorEntry
 }
 
+// Contract error codes published by Archive-Node-API in extensions.code.
+//
+// These are the supported way to branch on a failure. Message text is
+// deliberately minimal — the server blocks GraphQL field suggestions — and
+// carries no stability promise, so do not match on it.
+const (
+	// CodeBlockRangeError means the requested range exceeds BLOCK_RANGE_SIZE.
+	// Narrow the range; retrying unchanged will fail again.
+	CodeBlockRangeError = "BLOCK_RANGE_ERROR"
+	// CodeActionStateNotFound means the action state is not in the archive.
+	CodeActionStateNotFound = "ACTION_STATE_NOT_FOUND"
+	// CodeActionStateOutOfRange means the action state falls outside the
+	// requested block range.
+	CodeActionStateOutOfRange = "ACTION_STATE_OUT_OF_RANGE"
+	// CodeRateLimited means the request was rate limited. See RateLimitError.
+	CodeRateLimited = "RATE_LIMITED"
+)
+
+// GraphQLErrorLocation is one entry of an error's `locations` array.
+type GraphQLErrorLocation struct {
+	Line   int `json:"line"`
+	Column int `json:"column"`
+}
+
 // GraphQLErrorEntry is one item from the GraphQL response's `errors` field.
+//
+// Extensions is kept whole rather than flattened, so a caller can read fields
+// the SDK does not model yet. Note the API answers every GraphQL-level error
+// with HTTP 200 — extensions["status"] is a payload field, not the HTTP
+// status — so this struct is the only place the information exists.
 type GraphQLErrorEntry struct {
-	Message string `json:"message"`
+	Message    string                 `json:"message"`
+	Extensions map[string]any         `json:"extensions,omitempty"`
+	Path       []any                  `json:"path,omitempty"`
+	Locations  []GraphQLErrorLocation `json:"locations,omitempty"`
+}
+
+// Code returns extensions.code, or "" when the server sent none.
+//
+// A masked error has no extensions at all — the server runs with
+// maskedErrors and isDev false — so "" means "no code was sent", never "no
+// error occurred".
+func (e GraphQLErrorEntry) Code() string {
+	if e.Extensions == nil {
+		return ""
+	}
+	code, _ := e.Extensions["code"].(string)
+	return code
+}
+
+// Code returns the first non-empty extensions.code among the entries, or "".
+func (e *GraphQLError) Code() string {
+	for _, entry := range e.Errors {
+		if code := entry.Code(); code != "" {
+			return code
+		}
+	}
+	return ""
+}
+
+// Codes returns every non-empty extensions.code among the entries, in order.
+func (e *GraphQLError) Codes() []string {
+	var codes []string
+	for _, entry := range e.Errors {
+		if code := entry.Code(); code != "" {
+			codes = append(codes, code)
+		}
+	}
+	return codes
+}
+
+// HasCode reports whether any entry carries the given extensions.code.
+func (e *GraphQLError) HasCode(code string) bool {
+	for _, entry := range e.Errors {
+		if entry.Code() == code {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *GraphQLError) Error() string {
