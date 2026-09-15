@@ -30,7 +30,7 @@ import (
 )
 
 func main() {
-    client := archive.NewClient(archive.WithGraphQLURI("https://archive.example/graphql"))
+    client := archive.NewClient(archive.WithGraphQLURI("https://archive.example/"))
     defer client.Close()
 
     events, err := client.GetEvents(context.Background(), archive.EventFilterOptionsInput{
@@ -45,6 +45,10 @@ func main() {
     fmt.Printf("got %d event group(s)\n", len(events))
 }
 ```
+
+> **The endpoint is the root path.** Archive-Node-API serves GraphQL at `/`, not
+> `/graphql`. Pass the base URL as-is — the SDK never appends a path, so a URL
+> ending in `/graphql` reaches a route the server does not serve and returns 404.
 
 ## API
 
@@ -63,7 +67,7 @@ Each method on `*Client` maps 1:1 to a GraphQL query in the [Archive-Node-API sc
 
 ```go
 client := archive.NewClient(
-    archive.WithGraphQLURI("https://archive.example/graphql"),
+    archive.WithGraphQLURI("https://archive.example/"),
     archive.WithRetries(5),
     archive.WithRetryDelay(10*time.Second),
     archive.WithTimeout(60*time.Second),
@@ -110,7 +114,7 @@ case errors.As(err, &missErr):
 ## Examples
 
 ```sh
-ARCHIVE_GRAPHQL_URI=https://archive.example/graphql go run ./examples/networkstate
+ARCHIVE_GRAPHQL_URI=https://archive.example/ go run ./examples/networkstate
 ```
 
 See `examples/`:

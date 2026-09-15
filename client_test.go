@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -341,5 +342,63 @@ func TestContextCancellationDuringBackoff(t *testing.T) {
 	_, err := client.GetNetworkState(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
+	}
+}
+
+// The endpoint is the server's root path "/" (#6). Pointing the client at
+// "/graphql" gets a 404 whose body is HTML, and that used to be reported as a
+// JSON "decode response" failure, which sent people looking in the wrong
+// place. The status is now read before the body is parsed.
+func TestHTTPErrorOnNonJSON404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("<!DOCTYPE html><html><body>Not Found</body></html>"))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	defer client.Close()
+
+	_, err := client.GetNetworkState(context.Background())
+	if err == nil {
+		t.Fatal("expected an error from a 404")
+	}
+
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected *HTTPError, got %T: %v", err, err)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		t.Errorf("StatusCode = %d, want 404", httpErr.StatusCode)
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Errorf("error message %q should mention 404", err.Error())
+	}
+	if strings.Contains(err.Error(), "decode response") {
+		t.Errorf("a 404 should not be reported as a decode failure: %q", err.Error())
+	}
+}
+
+// The same 404 with a JSON body must also be an *HTTPError, so callers have
+// one type to match on regardless of what the failing route happens to serve.
+func TestHTTPErrorOnJSON404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	defer client.Close()
+
+	_, err := client.GetNetworkState(context.Background())
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected *HTTPError, got %T: %v", err, err)
+	}
+	if httpErr.StatusCode != http.StatusNotFound {
+		t.Errorf("StatusCode = %d, want 404", httpErr.StatusCode)
 	}
 }

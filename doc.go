@@ -11,9 +11,13 @@
 //   - Block details including transactions, by height/date range.
 //   - Network state — the archive's max canonical and pending block heights.
 //
+// Archive-Node-API serves GraphQL at the root path "/", not "/graphql". Pass
+// the base URL as-is — the SDK never appends a path, so a URL ending in
+// "/graphql" returns 404.
+//
 // Basic usage:
 //
-//	client := archive.NewClient(archive.WithGraphQLURI("https://archive.example/graphql"))
+//	client := archive.NewClient(archive.WithGraphQLURI("https://archive.example/"))
 //	defer client.Close()
 //
 //	events, err := client.GetEvents(archive.EventFilterOptionsInput{
