@@ -77,6 +77,9 @@ jobs:
         env:
           PG_CONN: postgres://postgres:postgres@localhost:5432/archive_test
           PORT: '8080'
+          # Off by default upstream, which left the block-transaction decode
+          # path completely uncovered and the README's claim unverified (#7).
+          ENABLE_BLOCK_TRANSACTION_DETAILS: 'true'
         run: |
           npm ci
           npm run build

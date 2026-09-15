@@ -59,9 +59,17 @@ Each method on `*Client` maps 1:1 to a GraphQL query in the [Archive-Node-API sc
 | `GetEvents(ctx, input)` | `[]EventOutput` | Events emitted by a zkApp account, optionally filtered by block range and consensus status. |
 | `GetActions(ctx, input)` | `[]ActionOutput` | Actions dispatched from a zkApp account. |
 | `GetNetworkState(ctx)` | `*NetworkStateOutput` | Archive's max canonical / pending block heights. |
-| `GetBlocks(ctx, opts)` | `[]Block` | Blocks filtered by height/date range and chain status, with full transaction detail. |
+| `GetBlocks(ctx, opts)` | `[]Block` | Blocks filtered by height/date range and chain status. Transaction detail needs `ENABLE_BLOCK_TRANSACTION_DETAILS` on the server — see below. |
 | `GetVerificationKeyUpdates(ctx, in)` | `[]VerificationKeyUpdate` | Applied account updates that set a given verification key, within a required block range. |
 | `ExecuteQuery(ctx, gql, vars, name)` | `json.RawMessage` | Low-level escape hatch returning the raw `data` field. |
+
+### Block transaction detail
+
+`GetBlocks` returns transaction detail only when the server sets
+`ENABLE_BLOCK_TRANSACTION_DETAILS=true`. It **defaults to `false`**, and on a stock
+server every block comes back with `ParentHash` as `""` and `UserCommands`,
+`ZkappCommands` and `FeeTransfer` all empty. `Coinbase` **is** populated either way,
+which is what makes the response look healthy rather than obviously truncated.
 
 ### Configuration
 
