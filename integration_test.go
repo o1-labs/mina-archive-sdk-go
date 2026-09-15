@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -32,24 +33,25 @@ func TestIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("NetworkState", func(t *testing.T) {
-		// NOTE: against the static archive_db.sql fixture, the upstream
-		// network-service resolver crashes if either canonical or pending rows
-		// are missing (see Archive-Node-API's `network-service.ts`). When the
-		// upstream is patched, replace this tolerance with a real assertion.
 		state, err := client.GetNetworkState(ctx)
 		if err != nil {
+			// The tolerance is deliberately narrow: only the one upstream
+			// resolver crash this fixture is known to trigger is excused.
+			// Catching every *GraphQLError made this subtest a no-op against
+			// any erroring server (#14).
 			var gql *GraphQLError
-			if errors.As(err, &gql) {
-				t.Logf("NetworkState returned a GraphQL error (known upstream issue against fixture): %v", err)
-				return
+			if errors.As(err, &gql) && strings.Contains(err.Error(), "Cannot read properties of undefined") {
+				t.Skipf("known upstream network-service crash against the static fixture: %v", err)
 			}
 			t.Fatal(err)
 		}
 		if state.MaxBlockHeight == nil {
 			t.Fatal("maxBlockHeight nil")
 		}
-		if state.MaxBlockHeight.CanonicalMaxBlockHeight < 0 {
-			t.Errorf("canonical = %d", state.MaxBlockHeight.CanonicalMaxBlockHeight)
+		// The fixture has 39 blocks, so a real archive reports a real height.
+		if state.MaxBlockHeight.CanonicalMaxBlockHeight <= 0 {
+			t.Errorf("canonicalMaxBlockHeight = %d, want > 0 against a populated archive",
+				state.MaxBlockHeight.CanonicalMaxBlockHeight)
 		}
 	})
 
@@ -61,8 +63,32 @@ func TestIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if events == nil {
-			t.Error("events slice should be non-nil even when empty")
+		if len(events) == 0 {
+			t.Fatal("no event groups for the fixture address; the fixture is known to populate this query")
+		}
+
+		// Assert content, not nil-ness. A renamed field or a changed scalar
+		// encoding has to fail here.
+		var withBlockInfo int
+		for _, group := range events {
+			if group.BlockInfo == nil {
+				continue
+			}
+			withBlockInfo++
+			if group.BlockInfo.Height <= 0 {
+				t.Errorf("blockInfo.height = %d, want > 0", group.BlockInfo.Height)
+			}
+			if group.BlockInfo.StateHash == "" {
+				t.Error("blockInfo.stateHash is empty")
+			}
+			// Unix epoch milliseconds as a decimal string, not RFC3339.
+			if _, err := group.BlockInfo.Time(); err != nil {
+				t.Errorf("blockInfo.timestamp %q does not parse: %v",
+					group.BlockInfo.Timestamp, err)
+			}
+		}
+		if withBlockInfo == 0 {
+			t.Error("no event group carried a blockInfo")
 		}
 	})
 
@@ -74,8 +100,26 @@ func TestIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if actions == nil {
-			t.Error("actions slice should be non-nil")
+		if len(actions) == 0 {
+			t.Fatal("no action groups for the fixture address; the fixture is known to populate this query")
+		}
+
+		var withBlockInfo int
+		for _, group := range actions {
+			if group.BlockInfo == nil {
+				continue
+			}
+			withBlockInfo++
+			if group.BlockInfo.Height <= 0 {
+				t.Errorf("blockInfo.height = %d, want > 0", group.BlockInfo.Height)
+			}
+			if _, err := group.BlockInfo.Time(); err != nil {
+				t.Errorf("blockInfo.timestamp %q does not parse: %v",
+					group.BlockInfo.Timestamp, err)
+			}
+		}
+		if withBlockInfo == 0 {
+			t.Error("no action group carried a blockInfo")
 		}
 	})
 
@@ -88,12 +132,21 @@ func TestIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if updates == nil {
-			t.Error("updates slice should be non-nil even when empty")
+		if len(updates) == 0 {
+			t.Fatal("no verification-key updates; the fixture contains this key, so an empty result is a decode or query regression")
 		}
 		for _, u := range updates {
 			if u.VerificationKeyHash != fixtureVerificationKeyHash {
 				t.Errorf("verificationKeyHash = %q, want the requested key", u.VerificationKeyHash)
+			}
+			if u.BlockInfo.Height <= 0 {
+				t.Errorf("blockInfo.height = %d, want > 0", u.BlockInfo.Height)
+			}
+			if u.Address == "" {
+				t.Error("address is empty")
+			}
+			if _, err := u.BlockInfo.Time(); err != nil {
+				t.Errorf("blockInfo.timestamp %q does not parse: %v", u.BlockInfo.Timestamp, err)
 			}
 		}
 	})
@@ -109,6 +162,9 @@ func TestIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if len(blocks) == 0 {
+			t.Fatal("no canonical blocks; the fixture holds 24 of them")
+		}
 		if len(blocks) >= 2 && blocks[0].BlockHeight < blocks[1].BlockHeight {
 			t.Errorf("DESC sort not honored: %d < %d", blocks[0].BlockHeight, blocks[1].BlockHeight)
 		}
@@ -117,11 +173,23 @@ func TestIntegration(t *testing.T) {
 		// so the decode path for transactions is exercised rather than assumed.
 		// Every canonical block in the fixture at height 22 and above carries at
 		// least one command, so this cannot be satisfied by an empty result.
-		if len(blocks) == 0 {
-			t.Fatal("expected at least one canonical block in the fixture")
-		}
 		totalTxns := 0
 		for _, b := range blocks {
+			if b.BlockHeight <= 0 {
+				t.Errorf("blockHeight = %d, want > 0", b.BlockHeight)
+			}
+			if b.StateHash == "" {
+				t.Error("stateHash is empty")
+			}
+			// DateTime is ISO-8601, unlike BlockInfo.Timestamp.
+			if _, err := time.Parse(time.RFC3339, b.DateTime); err != nil {
+				t.Errorf("dateTime %q is not RFC3339: %v", b.DateTime, err)
+			}
+			// Coinbase is populated regardless of the transaction-detail flag.
+			if _, err := CurrencyFromGraphQL(b.Transactions.Coinbase); err != nil {
+				t.Errorf("coinbase %q does not parse as currency: %v",
+					b.Transactions.Coinbase, err)
+			}
 			totalTxns += len(b.Transactions.UserCommands) +
 				len(b.Transactions.ZkappCommands) +
 				len(b.Transactions.FeeTransfer)
