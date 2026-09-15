@@ -216,7 +216,14 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 
 		// GraphQL-level errors are not retried — they are deterministic.
 		if len(gql.Errors) > 0 {
-			return nil, &GraphQLError{QueryName: queryName, Errors: gql.Errors}
+			// Attach whatever data came with the errors. A partial payload is
+			// a normal GraphQL outcome and used to be discarded here, before
+			// gql.Data was ever looked at.
+			return nil, &GraphQLError{
+				QueryName: queryName,
+				Errors:    gql.Errors,
+				Data:      gql.Data,
+			}
 		}
 
 		return gql.Data, nil

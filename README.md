@@ -181,6 +181,32 @@ All of these arrive as **HTTP 200** with a populated `errors` array;
 means no code was sent — the server masks unexpected errors, and those carry no
 `extensions` at all — not that nothing went wrong.
 
+#### Partial results
+
+A response can legally carry **both** `data` and `errors`. The root lists and most of
+their fields are nullable, so a field-level resolver error nullifies a sub-tree rather
+than the whole response, and the rows that succeeded still arrive.
+
+`GetEvents` and friends still return an error in that case — a partial result is not a
+success — but the payload is attached to `*GraphQLError.Data` instead of being thrown
+away. On a long block-range walk this is the difference between losing one row and
+losing the whole page:
+
+```go
+var gqlErr *archive.GraphQLError
+if errors.As(err, &gqlErr) && gqlErr.HasPartialData() {
+    var payload struct {
+        Events []archive.EventOutput `json:"events"`
+    }
+    if err := json.Unmarshal(gqlErr.Data, &payload); err == nil {
+        // payload.Events holds the rows the server did return.
+    }
+}
+```
+
+`Data` is nil when the server sent `"data": null`, which is a total failure rather than
+a partial one — `HasPartialData` tells the two apart.
+
 ## Examples
 
 ```sh
