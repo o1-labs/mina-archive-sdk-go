@@ -112,5 +112,25 @@ func TestIntegration(t *testing.T) {
 		if len(blocks) >= 2 && blocks[0].BlockHeight < blocks[1].BlockHeight {
 			t.Errorf("DESC sort not honored: %d < %d", blocks[0].BlockHeight, blocks[1].BlockHeight)
 		}
+
+		// The workflow runs the server with ENABLE_BLOCK_TRANSACTION_DETAILS=true,
+		// so the decode path for transactions is exercised rather than assumed.
+		// Every canonical block in the fixture at height 22 and above carries at
+		// least one command, so this cannot be satisfied by an empty result.
+		if len(blocks) == 0 {
+			t.Fatal("expected at least one canonical block in the fixture")
+		}
+		totalTxns := 0
+		for _, b := range blocks {
+			totalTxns += len(b.Transactions.UserCommands) +
+				len(b.Transactions.ZkappCommands) +
+				len(b.Transactions.FeeTransfer)
+			if b.ParentHash == "" {
+				t.Errorf("block %d has an empty ParentHash; is ENABLE_BLOCK_TRANSACTION_DETAILS set?", b.BlockHeight)
+			}
+		}
+		if totalTxns == 0 {
+			t.Errorf("no transactions decoded across %d block(s); is ENABLE_BLOCK_TRANSACTION_DETAILS set?", len(blocks))
+		}
 	})
 }

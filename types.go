@@ -187,17 +187,29 @@ type FeeTransfer struct {
 
 // BlockTransactions bundles the four transaction kinds in a block.
 type BlockTransactions struct {
-	Coinbase      string         `json:"coinbase"`
-	UserCommands  []UserCommand  `json:"userCommands"`
+	// Coinbase is populated regardless of ENABLE_BLOCK_TRANSACTION_DETAILS.
+	Coinbase string `json:"coinbase"`
+	// UserCommands is empty unless the server sets ENABLE_BLOCK_TRANSACTION_DETAILS=true.
+	UserCommands []UserCommand `json:"userCommands"`
+	// ZkappCommands is empty unless the server sets ENABLE_BLOCK_TRANSACTION_DETAILS=true.
 	ZkappCommands []ZkAppCommand `json:"zkappCommands"`
-	FeeTransfer   []FeeTransfer  `json:"feeTransfer"`
+	// FeeTransfer is empty unless the server sets ENABLE_BLOCK_TRANSACTION_DETAILS=true.
+	FeeTransfer []FeeTransfer `json:"feeTransfer"`
 }
 
 // Block is one entry returned from GetBlocks.
+//
+// Transaction detail is gated behind the server's
+// ENABLE_BLOCK_TRANSACTION_DETAILS, which defaults to false. Against a stock
+// server ParentHash is "" and Transactions.UserCommands,
+// Transactions.ZkappCommands and Transactions.FeeTransfer are all empty, while
+// Transactions.Coinbase is populated — so the response looks healthy and is
+// easily mistaken for an empty chain or an SDK bug.
 type Block struct {
-	BlockHeight  int               `json:"blockHeight"`
-	Creator      string            `json:"creator"`
-	StateHash    string            `json:"stateHash"`
+	BlockHeight int    `json:"blockHeight"`
+	Creator     string `json:"creator"`
+	StateHash   string `json:"stateHash"`
+	// ParentHash is "" unless the server sets ENABLE_BLOCK_TRANSACTION_DETAILS=true.
 	ParentHash   string            `json:"parentHash"`
 	DateTime     string            `json:"dateTime"`
 	Transactions BlockTransactions `json:"transactions"`
