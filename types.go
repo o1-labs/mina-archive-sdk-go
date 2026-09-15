@@ -1,6 +1,11 @@
 package archive
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"time"
+)
 
 // BlockStatusFilter filters events/actions by consensus status.
 type BlockStatusFilter string
@@ -60,13 +65,70 @@ type VerificationKeyUpdateFilterInput struct {
 }
 
 // BlockQueryInput filters blocks by height, date, or canonical status.
+//
+// The date bounds must be ISO-8601. The server coerces them with JavaScript's
+// new Date(value).getTime(); a value it cannot parse becomes NaN, which reaches
+// SQL as the literal string "NaN" and matches nothing *without erroring* — the
+// query returns HTTP 200 and an empty list. "14/08/2023" fails this way, and
+// "Aug 14 2023" parses but depends on the server's local timezone.
+//
+// Use SetDateTimeRange or DateTimeFilter rather than formatting by hand.
 type BlockQueryInput struct {
-	BlockHeightGte *int   // inclusive
-	BlockHeightLt  *int   // exclusive
-	DateTimeGte    string // ISO-8601
-	DateTimeLt     string // ISO-8601
-	Canonical      *bool
-	InBestChain    *bool
+	BlockHeightGte *int // inclusive
+	BlockHeightLt  *int // exclusive
+	// DateTimeGte is the inclusive lower bound, ISO-8601. See the type doc for
+	// the silent-empty-result hazard; prefer SetDateTimeRange.
+	DateTimeGte string
+	// DateTimeLt is the exclusive upper bound, ISO-8601. See the type doc for
+	// the silent-empty-result hazard; prefer SetDateTimeRange.
+	DateTimeLt  string
+	Canonical   *bool
+	InBestChain *bool
+}
+
+// Time parses Timestamp, which is Unix epoch milliseconds as a decimal string.
+//
+// This exists because the obvious call is wrong in two different ways:
+// time.Parse(time.RFC3339, bi.Timestamp) returns a parse error, and treating
+// the value as seconds silently yields a date in 1970.
+func (bi BlockInfo) Time() (time.Time, error) {
+	ms, err := strconv.ParseInt(bi.Timestamp, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("BlockInfo.Timestamp %q is not Unix epoch milliseconds: %w", bi.Timestamp, err)
+	}
+	return time.UnixMilli(ms).UTC(), nil
+}
+
+// Time parses DateTime, which is ISO-8601.
+//
+// Note this is a different encoding from BlockInfo.Timestamp, which is Unix
+// epoch milliseconds as a decimal string.
+func (b Block) Time() (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, b.DateTime)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("Block.DateTime %q is not ISO-8601: %w", b.DateTime, err)
+	}
+	return t.UTC(), nil
+}
+
+// DateTimeFilter formats t for the DateTimeGte/DateTimeLt bounds.
+//
+// The result is always a value the server parses to a finite number, so it
+// cannot produce the silent empty result a hand-written string can.
+func DateTimeFilter(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+// SetDateTimeRange sets both date bounds from time.Time values, lower bound
+// inclusive and upper bound exclusive, matching the server's range semantics.
+// A zero time.Time leaves that bound unset.
+func (in *BlockQueryInput) SetDateTimeRange(gte, lt time.Time) {
+	if !gte.IsZero() {
+		in.DateTimeGte = DateTimeFilter(gte)
+	}
+	if !lt.IsZero() {
+		in.DateTimeLt = DateTimeFilter(lt)
+	}
 }
 
 // VerificationKeyUpdate is an applied account update that set a verification key.
@@ -107,11 +169,15 @@ type ActionData struct {
 // BlockInfo carries the block-level metadata returned alongside an
 // event/action group.
 type BlockInfo struct {
-	Height                     int    `json:"height"`
-	StateHash                  string `json:"stateHash"`
-	ParentHash                 string `json:"parentHash"`
-	LedgerHash                 string `json:"ledgerHash"`
-	ChainStatus                string `json:"chainStatus"`
+	Height      int    `json:"height"`
+	StateHash   string `json:"stateHash"`
+	ParentHash  string `json:"parentHash"`
+	LedgerHash  string `json:"ledgerHash"`
+	ChainStatus string `json:"chainStatus"`
+	// Timestamp is Unix epoch MILLISECONDS as a decimal string, e.g.
+	// "1692054601000" — not RFC3339. Parsing it with time.RFC3339 fails, and
+	// reading it as seconds puts the block in 1970. Use BlockInfo.Time().
+	// Contrast Block.DateTime, which is ISO-8601.
 	Timestamp                  string `json:"timestamp"`
 	GlobalSlotSinceHardfork    int    `json:"globalSlotSinceHardfork"`
 	GlobalSlotSinceGenesis     int    `json:"globalSlotSinceGenesis"`
@@ -210,7 +276,11 @@ type Block struct {
 	Creator     string `json:"creator"`
 	StateHash   string `json:"stateHash"`
 	// ParentHash is "" unless the server sets ENABLE_BLOCK_TRANSACTION_DETAILS=true.
-	ParentHash   string            `json:"parentHash"`
+	ParentHash string `json:"parentHash"`
+	// DateTime is an ISO-8601 instant, e.g. "2023-08-14T23:10:01.000Z". The
+	// server derives it from the same archive column that BlockInfo.Timestamp
+	// exposes raw, so the two carry the same kind of value in two different
+	// encodings. Use Block.Time().
 	DateTime     string            `json:"dateTime"`
 	Transactions BlockTransactions `json:"transactions"`
 }
