@@ -83,6 +83,44 @@ client := archive.NewClient(
 )
 ```
 
+### Dates and times
+
+The schema carries **two different time encodings**, a few fields apart, and both
+arrive as strings:
+
+| Field | Encoding | Example |
+| --- | --- | --- |
+| `BlockInfo.Timestamp` | Unix epoch **milliseconds**, decimal string | `"1692054601000"` |
+| `Block.DateTime` | ISO-8601 | `"2023-08-14T23:10:01.000Z"` |
+
+`BlockInfo.Timestamp` is a raw pass-through of the archive DB column. `time.Parse(time.RFC3339, ...)`
+fails on it, and reading it as seconds puts the block in the wrong century. Each type
+has a `Time()` accessor that handles its own encoding:
+
+```go
+t, err := blockInfo.Time() // parses Unix epoch milliseconds
+t, err := block.Time()     // parses ISO-8601
+```
+
+On input, `DateTimeGte` / `DateTimeLt` must be ISO-8601. The server coerces them with
+JavaScript's `new Date(value).getTime()`, and a value it cannot parse becomes `NaN`,
+which reaches SQL as the string `"NaN"` and **matches nothing without erroring** —
+HTTP 200, empty list, no diagnostic anywhere:
+
+```text
+"2023-08-14T00:00:00Z"  -> 1691971200000    ok
+"2023-08-14"            -> 1691971200000    ok
+"14/08/2023"            -> NaN              silently returns zero rows
+"Aug 14 2023"           -> 1691964000000    parses, but timezone-dependent
+```
+
+Build the bounds from `time.Time` instead of formatting them by hand:
+
+```go
+var q archive.BlockQueryInput
+q.SetDateTimeRange(from, to) // lower inclusive, upper exclusive
+```
+
 ### Currency helper
 
 `Currency` wraps nanomina amounts in a `uint64` for safe parsing of coinbase / fee / user-command values:
