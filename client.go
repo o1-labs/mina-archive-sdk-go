@@ -158,6 +158,18 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 			continue
 		}
 
+		// Check the status before trying to read the body as GraphQL. A 4xx
+		// body is frequently HTML — hitting a path the server does not serve
+		// returns a 404 page — and parsing it first turned a plain 404 into a
+		// misleading "decode response" error.
+		if resp.StatusCode >= 400 {
+			return nil, &HTTPError{
+				QueryName:  queryName,
+				StatusCode: resp.StatusCode,
+				Body:       truncate(string(body), 200),
+			}
+		}
+
 		var gql graphqlResponse
 		if err := json.Unmarshal(body, &gql); err != nil {
 			return nil, fmt.Errorf("decode response: %w (body: %s)", err, truncate(string(body), 200))
@@ -166,11 +178,6 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 		// GraphQL-level errors are not retried — they are deterministic.
 		if len(gql.Errors) > 0 {
 			return nil, &GraphQLError{QueryName: queryName, Errors: gql.Errors}
-		}
-
-		if resp.StatusCode >= 400 {
-			// 4xx with no GraphQL error array — surface as a hard failure.
-			return nil, fmt.Errorf("HTTP %d in %s: %s", resp.StatusCode, queryName, truncate(string(body), 200))
 		}
 
 		return gql.Data, nil

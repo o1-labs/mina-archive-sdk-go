@@ -25,6 +25,26 @@ func (e *GraphQLError) Error() string {
 	return fmt.Sprintf("GraphQL error in %s: %s", e.QueryName, strings.Join(msgs, "; "))
 }
 
+// HTTPError is returned when the server replies with a status the client
+// cannot interpret as a GraphQL response — most often because the request
+// never reached the GraphQL handler at all.
+//
+// Archive-Node-API answers every GraphQL-level error with HTTP 200 and a
+// populated "errors" array, so a 4xx here does not mean "bad query". The
+// usual cause is a URL pointing somewhere the server does not serve: the
+// endpoint is the root path "/", and "/graphql" returns 404.
+//
+// Body holds the raw response, truncated, which may be HTML rather than JSON.
+type HTTPError struct {
+	QueryName  string
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("HTTP %d in %s: %s", e.StatusCode, e.QueryName, e.Body)
+}
+
 // ConnectionError is returned when the client exhausts its retries against
 // transient transport/HTTP failures.
 type ConnectionError struct {
