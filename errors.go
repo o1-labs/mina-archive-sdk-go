@@ -1,15 +1,30 @@
 package archive
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
 // GraphQLError is returned when the server replies with a non-empty `errors`
 // array. GraphQL-level errors are not retried by the client.
+//
+// Data carries the response's `data` field when the server sent one alongside
+// the errors. HTTP 200 with both is a normal GraphQL outcome: the root lists
+// and most of their fields are nullable, so a field-level resolver error
+// nullifies a sub-tree rather than the whole response. Unmarshal it to recover
+// the rows that did arrive. It is nil when the server sent `"data": null`,
+// which is a total failure rather than a partial one.
 type GraphQLError struct {
 	QueryName string
 	Errors    []GraphQLErrorEntry
+	Data      json.RawMessage
+}
+
+// HasPartialData reports whether the server returned usable data alongside the
+// errors.
+func (e *GraphQLError) HasPartialData() bool {
+	return len(e.Data) > 0 && string(e.Data) != "null"
 }
 
 // Contract error codes published by Archive-Node-API in extensions.code.

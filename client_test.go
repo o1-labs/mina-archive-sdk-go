@@ -573,3 +573,61 @@ func TestMaskedErrorHasNoCodeAndDoesNotPanic(t *testing.T) {
 		t.Errorf("Codes() = %v, want nil", gqlErr.Codes())
 	}
 }
+
+// HTTP 200 with BOTH a partial data payload and an errors array is a normal
+// GraphQL outcome (#13). The client returned as soon as it saw errors, so the
+// rows the server did return were unreachable.
+func TestGraphQLErrorCarriesPartialData(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"events":[{"blockInfo":{"height":100,"stateHash":"3NK","parentHash":"3NL","ledgerHash":"jx","chainStatus":"canonical","timestamp":"1692054601000","globalSlotSinceHardfork":1,"globalSlotSinceGenesis":2,"distanceFromMaxBlockHeight":3},"eventData":null}]},"errors":[{"message":"Cannot return null for non-nullable field"}]}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	defer client.Close()
+
+	_, err := client.GetEvents(context.Background(), EventFilterOptionsInput{Address: "B62q..."})
+	var gqlErr *GraphQLError
+	if !errors.As(err, &gqlErr) {
+		t.Fatalf("expected *GraphQLError, got %T: %v", err, err)
+	}
+	if !gqlErr.HasPartialData() {
+		t.Fatal("HasPartialData() = false, want true")
+	}
+
+	// The issue's criterion: Data unmarshals to the event group on the wire.
+	var payload struct {
+		Events []EventOutput `json:"events"`
+	}
+	if err := json.Unmarshal(gqlErr.Data, &payload); err != nil {
+		t.Fatalf("Data does not unmarshal: %v", err)
+	}
+	if len(payload.Events) != 1 {
+		t.Fatalf("recovered %d event group(s), want 1", len(payload.Events))
+	}
+	if got := payload.Events[0].BlockInfo.Height; got != 100 {
+		t.Errorf("recovered height = %d, want 100", got)
+	}
+}
+
+// "data": null alongside errors is a total failure, not a partial one.
+func TestNullDataIsNotPartial(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":null,"errors":[{"message":"Unexpected error."}]}`))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv)
+	defer client.Close()
+
+	_, err := client.GetEvents(context.Background(), EventFilterOptionsInput{Address: "B62q..."})
+	var gqlErr *GraphQLError
+	if !errors.As(err, &gqlErr) {
+		t.Fatalf("expected *GraphQLError, got %T: %v", err, err)
+	}
+	if gqlErr.HasPartialData() {
+		t.Errorf("HasPartialData() = true for data:null, want false (Data=%s)", gqlErr.Data)
+	}
+}
