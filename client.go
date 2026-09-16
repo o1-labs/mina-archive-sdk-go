@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -197,6 +199,27 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 			continue
 		}
 
+		// 429 is the only non-200 the API emits under normal operation, so it
+		// unambiguously means "slow down" and is the one status where retrying
+		// the identical request is correct. It used to fall through to the
+		// GraphQL-error path and be reported as a permanent query defect.
+		if resp.StatusCode == http.StatusTooManyRequests {
+			rateErr := newRateLimitError(queryName, resp.Header, body)
+			c.logf("GraphQL %s rate limited, retry after %s", queryName, rateErr.RetryAfter)
+			if attempt < c.retries {
+				wait := rateErr.RetryAfter
+				if wait <= 0 {
+					wait = c.retryDelay
+				}
+				if waitErr := sleepCtx(ctx, wait); waitErr != nil {
+					return nil, waitErr
+				}
+				lastErr = rateErr
+				continue
+			}
+			return nil, rateErr
+		}
+
 		// Check the status before trying to read the body as GraphQL. A 4xx
 		// body is frequently HTML — hitting a path the server does not serve
 		// returns a 404 page — and parsing it first turned a plain 404 into a
@@ -377,4 +400,39 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// newRateLimitError builds a *RateLimitError from a 429's headers and body,
+// tolerating absent or malformed values throughout.
+func newRateLimitError(queryName string, header http.Header, body []byte) *RateLimitError {
+	e := &RateLimitError{
+		QueryName: queryName,
+		Limit:     headerInt(header, "X-RateLimit-Limit", -1),
+		Remaining: headerInt(header, "X-RateLimit-Remaining", -1),
+	}
+	// The server sends delay-seconds. The HTTP-date form of retry-after is
+	// legal but is not what this API emits, so anything unparseable leaves
+	// RetryAfter at zero rather than producing a wrong duration.
+	if secs := headerInt(header, "Retry-After", -1); secs >= 0 {
+		e.RetryAfter = time.Duration(secs) * time.Second
+	}
+	var gql graphqlResponse
+	if err := json.Unmarshal(body, &gql); err == nil {
+		e.Errors = gql.Errors
+	}
+	return e
+}
+
+// headerInt reads a header as a non-negative int, returning fallback when it
+// is absent, empty, or not a number.
+func headerInt(header http.Header, name string, fallback int) int {
+	raw := strings.TrimSpace(header.Get(name))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
 }
