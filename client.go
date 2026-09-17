@@ -134,7 +134,11 @@ func (c *Client) GraphQLURI() string { return c.uri }
 func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[string]any, queryName string) (json.RawMessage, error) {
 	payload, err := json.Marshal(graphqlRequest{Query: query, Variables: variables})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, &InvalidInputError{
+			QueryName: queryName,
+			Field:     "variables",
+			Reason:    fmt.Sprintf("cannot be marshalled to JSON: %v", err),
+		}
 	}
 
 	var lastErr error
@@ -150,7 +154,11 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, c.uri, bytes.NewReader(payload))
 		if err != nil {
 			cancel()
-			return nil, fmt.Errorf("build request: %w", err)
+			return nil, &InvalidInputError{
+				QueryName: queryName,
+				Field:     "graphqlURI",
+				Reason:    fmt.Sprintf("cannot be used to build a request: %v", err),
+			}
 		}
 		req.Header.Set("Content-Type", "application/json")
 		for k, vs := range c.headers {
@@ -166,7 +174,16 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 			c.logf("GraphQL %s transport error: %v", queryName, err)
 			if attempt < c.retries {
 				if waitErr := sleepCtx(ctx, c.retryDelay); waitErr != nil {
-					return nil, waitErr
+					// Without this the caller's error type depended on which
+					// attempt the cancellation landed on: raw ctx.Err() here,
+					// but *ConnectionError when the loop fell through.
+					// Unwrap keeps errors.Is(err, context.DeadlineExceeded)
+					// working either way.
+					return nil, &ConnectionError{
+						QueryName: queryName,
+						Retries:   attempt,
+						LastError: waitErr,
+					}
 				}
 			}
 			continue
@@ -181,7 +198,16 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 			lastErr = readErr
 			if attempt < c.retries {
 				if waitErr := sleepCtx(ctx, c.retryDelay); waitErr != nil {
-					return nil, waitErr
+					// Without this the caller's error type depended on which
+					// attempt the cancellation landed on: raw ctx.Err() here,
+					// but *ConnectionError when the loop fell through.
+					// Unwrap keeps errors.Is(err, context.DeadlineExceeded)
+					// working either way.
+					return nil, &ConnectionError{
+						QueryName: queryName,
+						Retries:   attempt,
+						LastError: waitErr,
+					}
 				}
 			}
 			continue
@@ -193,7 +219,16 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 			c.logf("GraphQL %s HTTP %d", queryName, resp.StatusCode)
 			if attempt < c.retries {
 				if waitErr := sleepCtx(ctx, c.retryDelay); waitErr != nil {
-					return nil, waitErr
+					// Without this the caller's error type depended on which
+					// attempt the cancellation landed on: raw ctx.Err() here,
+					// but *ConnectionError when the loop fell through.
+					// Unwrap keeps errors.Is(err, context.DeadlineExceeded)
+					// working either way.
+					return nil, &ConnectionError{
+						QueryName: queryName,
+						Retries:   attempt,
+						LastError: waitErr,
+					}
 				}
 			}
 			continue
@@ -212,7 +247,11 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 					wait = c.retryDelay
 				}
 				if waitErr := sleepCtx(ctx, wait); waitErr != nil {
-					return nil, waitErr
+					return nil, &ConnectionError{
+						QueryName: queryName,
+						Retries:   attempt,
+						LastError: waitErr,
+					}
 				}
 				lastErr = rateErr
 				continue
@@ -234,7 +273,11 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 
 		var gql graphqlResponse
 		if err := json.Unmarshal(body, &gql); err != nil {
-			return nil, fmt.Errorf("decode response: %w (body: %s)", err, truncate(string(body), 200))
+			return nil, &DecodeError{
+				QueryName: queryName,
+				Body:      truncate(string(body), 200),
+				Err:       err,
+			}
 		}
 
 		// GraphQL-level errors are not retried — they are deterministic.
@@ -247,6 +290,14 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 				Errors:    gql.Errors,
 				Data:      gql.Data,
 			}
+		}
+
+		// A well-formed envelope with neither `data` nor `errors` — a bare
+		// `{}` is the common shape. Reporting this as a missing field beats
+		// letting the typed methods unmarshal a nil slice and blame
+		// "unexpected end of JSON input" on perfectly valid JSON.
+		if len(gql.Data) == 0 || string(gql.Data) == "null" {
+			return nil, &MissingFieldError{QueryName: queryName, Field: "data"}
 		}
 
 		return gql.Data, nil
@@ -264,7 +315,11 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 // value type here would silently decode a null element to a zero-value
 // EventOutput.
 func (c *Client) GetEvents(ctx context.Context, in EventFilterOptionsInput) ([]*EventOutput, error) {
-	data, err := c.ExecuteQuery(ctx, queryEvents, map[string]any{"input": in.toMap()}, "GetEvents")
+	input, err := in.toMap("GetEvents")
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.ExecuteQuery(ctx, queryEvents, map[string]any{"input": input}, "GetEvents")
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +327,7 @@ func (c *Client) GetEvents(ctx context.Context, in EventFilterOptionsInput) ([]*
 		Events *[]*EventOutput `json:"events"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("decode GetEvents: %w", err)
+		return nil, &DecodeError{QueryName: "GetEvents", Body: truncate(string(data), 200), Err: err}
 	}
 	if result.Events == nil {
 		return nil, &MissingFieldError{QueryName: "GetEvents", Field: "events"}
@@ -287,7 +342,11 @@ func (c *Client) GetEvents(ctx context.Context, in EventFilterOptionsInput) ([]*
 // value type here would silently decode a null element to a zero-value
 // ActionOutput.
 func (c *Client) GetActions(ctx context.Context, in ActionFilterOptionsInput) ([]*ActionOutput, error) {
-	data, err := c.ExecuteQuery(ctx, queryActions, map[string]any{"input": in.toMap()}, "GetActions")
+	input, err := in.toMap("GetActions")
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.ExecuteQuery(ctx, queryActions, map[string]any{"input": input}, "GetActions")
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +354,7 @@ func (c *Client) GetActions(ctx context.Context, in ActionFilterOptionsInput) ([
 		Actions *[]*ActionOutput `json:"actions"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("decode GetActions: %w", err)
+		return nil, &DecodeError{QueryName: "GetActions", Body: truncate(string(data), 200), Err: err}
 	}
 	if result.Actions == nil {
 		return nil, &MissingFieldError{QueryName: "GetActions", Field: "actions"}
@@ -313,7 +372,7 @@ func (c *Client) GetNetworkState(ctx context.Context) (*NetworkStateOutput, erro
 		NetworkState *NetworkStateOutput `json:"networkState"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("decode GetNetworkState: %w", err)
+		return nil, &DecodeError{QueryName: "GetNetworkState", Body: truncate(string(data), 200), Err: err}
 	}
 	if result.NetworkState == nil {
 		return nil, &MissingFieldError{QueryName: "GetNetworkState", Field: "networkState"}
@@ -343,9 +402,16 @@ func (c *Client) GetBlocks(ctx context.Context, opts BlocksOptions) ([]*Block, e
 		"sortBy": nil,
 	}
 	if opts.Query != nil {
-		vars["query"] = opts.Query.toMap()
+		query, err := opts.Query.toMap("GetBlocks")
+		if err != nil {
+			return nil, err
+		}
+		vars["query"] = query
 	}
 	if opts.Limit != nil {
+		if err := checkInt32("GetBlocks", "limit", *opts.Limit); err != nil {
+			return nil, err
+		}
 		vars["limit"] = *opts.Limit
 	}
 	if opts.SortBy != "" {
@@ -360,7 +426,7 @@ func (c *Client) GetBlocks(ctx context.Context, opts BlocksOptions) ([]*Block, e
 		Blocks *[]*Block `json:"blocks"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("decode GetBlocks: %w", err)
+		return nil, &DecodeError{QueryName: "GetBlocks", Body: truncate(string(data), 200), Err: err}
 	}
 	if result.Blocks == nil {
 		return nil, &MissingFieldError{QueryName: "GetBlocks", Field: "blocks"}
@@ -372,7 +438,11 @@ func (c *Client) GetBlocks(ctx context.Context, opts BlocksOptions) ([]*Block, e
 // verification key. The block range is required and the server caps its width,
 // so walk a wide history in pages rather than in one call.
 func (c *Client) GetVerificationKeyUpdates(ctx context.Context, in VerificationKeyUpdateFilterInput) ([]VerificationKeyUpdate, error) {
-	data, err := c.ExecuteQuery(ctx, queryVerificationKeyUpdates, map[string]any{"input": in.toMap()}, "GetVerificationKeyUpdates")
+	input, err := in.toMap("GetVerificationKeyUpdates")
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.ExecuteQuery(ctx, queryVerificationKeyUpdates, map[string]any{"input": input}, "GetVerificationKeyUpdates")
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +450,7 @@ func (c *Client) GetVerificationKeyUpdates(ctx context.Context, in VerificationK
 		VerificationKeyUpdates *[]VerificationKeyUpdate `json:"verificationKeyUpdates"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("decode GetVerificationKeyUpdates: %w", err)
+		return nil, &DecodeError{QueryName: "GetVerificationKeyUpdates", Body: truncate(string(data), 200), Err: err}
 	}
 	if result.VerificationKeyUpdates == nil {
 		return nil, &MissingFieldError{QueryName: "GetVerificationKeyUpdates", Field: "verificationKeyUpdates"}

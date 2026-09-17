@@ -90,7 +90,10 @@ func TestSetDateTimeRange(t *testing.T) {
 	var in BlockQueryInput
 	in.SetDateTimeRange(time.UnixMilli(1691971200000), time.UnixMilli(1692054601000))
 
-	m := in.toMap()
+	m, err := in.toMap("TestSetDateTimeRange")
+	if err != nil {
+		t.Fatalf("toMap: %v", err)
+	}
 	if got := m["dateTime_gte"]; got != "2023-08-14T00:00:00.000Z" {
 		t.Errorf("dateTime_gte = %v", got)
 	}
@@ -101,7 +104,10 @@ func TestSetDateTimeRange(t *testing.T) {
 	// A zero time leaves that bound alone, so it stays out of the payload.
 	var only BlockQueryInput
 	only.SetDateTimeRange(time.UnixMilli(1691971200000), time.Time{})
-	m2 := only.toMap()
+	m2, err := only.toMap("TestSetDateTimeRange")
+	if err != nil {
+		t.Fatalf("toMap: %v", err)
+	}
 	if _, ok := m2["dateTime_lt"]; ok {
 		t.Error("a zero upper bound should not be sent")
 	}
