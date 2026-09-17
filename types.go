@@ -144,26 +144,35 @@ type VerificationKeyUpdate struct {
 
 // TransactionInfo describes the transaction that emitted an event/action.
 type TransactionInfo struct {
-	Status                string `json:"status"`
-	Hash                  string `json:"hash"`
-	Memo                  string `json:"memo"`
-	AuthorizationKind     string `json:"authorizationKind"`
-	SequenceNumber        int    `json:"sequenceNumber"`
-	ZkappAccountUpdateIDs []int  `json:"zkappAccountUpdateIds"`
+	Status            string `json:"status"`
+	Hash              string `json:"hash"`
+	Memo              string `json:"memo"`
+	AuthorizationKind string `json:"authorizationKind"`
+	SequenceNumber    int    `json:"sequenceNumber"`
+	// ZkappAccountUpdateIDs is element-nullable in the SDL ([Int]!), so a
+	// member may be nil even though the list itself is always present. A value
+	// type here would decode a null to 0, indistinguishable from id 0.
+	ZkappAccountUpdateIDs []*int `json:"zkappAccountUpdateIds"`
 }
 
 // EventData is one event record from the archive.
 type EventData struct {
 	AccountUpdateID string           `json:"accountUpdateId"`
 	TransactionInfo *TransactionInfo `json:"transactionInfo"`
-	Data            []string         `json:"data"`
+	// Data is element-nullable in the SDL ([String]!), so a member may be nil
+	// even though the list itself is always present. A value type here would
+	// decode a null to "", indistinguishable from an empty string.
+	Data []*string `json:"data"`
 }
 
 // ActionData is one action record from the archive.
 type ActionData struct {
 	AccountUpdateID string           `json:"accountUpdateId"`
 	TransactionInfo *TransactionInfo `json:"transactionInfo"`
-	Data            []string         `json:"data"`
+	// Data is element-nullable in the SDL ([String]!), so a member may be nil
+	// even though the list itself is always present. A value type here would
+	// decode a null to "", indistinguishable from an empty string.
+	Data []*string `json:"data"`
 }
 
 // BlockInfo carries the block-level metadata returned alongside an
@@ -222,26 +231,30 @@ type NetworkStateOutput struct {
 //
 // Amount and Fee are nanomina decimal strings; parse with CurrencyFromGraphQL.
 type UserCommand struct {
-	Hash          string `json:"hash"`
-	Kind          string `json:"kind"`
-	From          string `json:"from"`
-	To            string `json:"to"`
-	Amount        string `json:"amount"`
-	Fee           string `json:"fee"`
-	Memo          string `json:"memo"`
-	Nonce         int    `json:"nonce"`
-	Status        string `json:"status"`
-	FailureReason string `json:"failureReason"`
+	Hash   string `json:"hash"`
+	Kind   string `json:"kind"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Amount string `json:"amount"`
+	Fee    string `json:"fee"`
+	Memo   string `json:"memo"`
+	Nonce  int    `json:"nonce"`
+	Status string `json:"status"`
+	// FailureReason is nullable in the SDL. nil means the command did not
+	// fail; a non-nil empty string means it failed with an empty reason.
+	FailureReason *string `json:"failureReason"`
 }
 
 // ZkAppCommand is a zkApp transaction inside a block.
 type ZkAppCommand struct {
-	Hash          string `json:"hash"`
-	FeePayer      string `json:"feePayer"`
-	Fee           string `json:"fee"`
-	Memo          string `json:"memo"`
-	Status        string `json:"status"`
-	FailureReason string `json:"failureReason"`
+	Hash     string `json:"hash"`
+	FeePayer string `json:"feePayer"`
+	Fee      string `json:"fee"`
+	Memo     string `json:"memo"`
+	Status   string `json:"status"`
+	// FailureReason is nullable in the SDL. nil means the command did not
+	// fail; a non-nil empty string means it failed with an empty reason.
+	FailureReason *string `json:"failureReason"`
 }
 
 // FeeTransfer is a fee-transfer transaction inside a block.

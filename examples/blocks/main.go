@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 
-	archive "github.com/o1-labs/mina-archive-sdk-go"
+	archive "github.com/o1-labs/mina-archive-sdk-go/v2"
 )
 
 func main() {
@@ -32,7 +32,13 @@ func main() {
 	}
 
 	fmt.Printf("got %d block(s)\n", len(blocks))
+	// [Block]! has nullable elements: the list is always present, but any
+	// element may be nil, so guard each one.
 	for _, b := range blocks {
+		if b == nil {
+			fmt.Println("  (null block)")
+			continue
+		}
 		coinbase, err := archive.CurrencyFromGraphQL(b.Transactions.Coinbase)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "block %d: bad coinbase %q: %v\n", b.BlockHeight, b.Transactions.Coinbase, err)
