@@ -3,6 +3,7 @@ package archive
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -215,4 +216,60 @@ func (e *InvalidCurrencyError) Error() string {
 		return fmt.Sprintf("invalid currency format %q: %s", e.Input, e.Reason)
 	}
 	return fmt.Sprintf("invalid currency format: %q", e.Input)
+}
+
+// DecodeError is returned when the server's reply is HTTP 200 but its body is
+// not a GraphQL response the client can read, or when a query's `data` field
+// does not fit the typed result.
+//
+// Body holds the raw response, truncated. The usual cause is an endpoint that
+// is not Archive-Node-API at all: a proxy error page, a redirect body, or a
+// load balancer's health text served with a 200.
+type DecodeError struct {
+	QueryName string
+	Body      string
+	Err       error
+}
+
+func (e *DecodeError) Error() string {
+	if e.Body == "" {
+		return fmt.Sprintf("decode %s: %v", e.QueryName, e.Err)
+	}
+	return fmt.Sprintf("decode %s: %v (body: %s)", e.QueryName, e.Err, e.Body)
+}
+
+func (e *DecodeError) Unwrap() error { return e.Err }
+
+// InvalidInputError is returned for a request the client rejects before
+// sending it, so no HTTP request is made.
+//
+// The common case is a GraphQL Int out of range. GraphQL Int is signed
+// 32-bit, and the server rejects an out-of-range value at validation time
+// after a full round trip; checking locally turns that into an immediate,
+// typed failure.
+type InvalidInputError struct {
+	QueryName string
+	Field     string
+	Reason    string
+}
+
+func (e *InvalidInputError) Error() string {
+	if e.QueryName == "" {
+		return fmt.Sprintf("invalid input %s: %s", e.Field, e.Reason)
+	}
+	return fmt.Sprintf("invalid input %s in %s: %s", e.Field, e.QueryName, e.Reason)
+}
+
+// checkInt32 reports whether v fits GraphQL's signed 32-bit Int.
+func checkInt32(queryName, field string, v int) error {
+	if v < math.MinInt32 || v > math.MaxInt32 {
+		return &InvalidInputError{
+			QueryName: queryName,
+			Field:     field,
+			Reason: fmt.Sprintf(
+				"%d is outside GraphQL Int's signed 32-bit range [%d, %d]",
+				v, math.MinInt32, math.MaxInt32),
+		}
+	}
+	return nil
 }

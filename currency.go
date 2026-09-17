@@ -22,6 +22,10 @@ func CurrencyFromNanomina(n uint64) Currency {
 // CurrencyFromMina parses a decimal MINA string like "1.5", "100", or
 // "0.000000001". Up to 9 decimal places. Negative or otherwise invalid
 // inputs return an *InvalidCurrencyError.
+//
+// Leading and trailing whitespace is trimmed, so " 5 " parses as 5 MINA.
+// One side of the decimal point may be empty — ".5" and "5." both parse —
+// but a bare "." does not.
 func CurrencyFromMina(s string) (Currency, error) {
 	n, err := parseDecimal(s)
 	if err != nil {
@@ -163,6 +167,12 @@ func parseDecimal(s string) (uint64, error) {
 		left, right := parts[0], parts[1]
 		if len(right) > 9 {
 			return 0, &InvalidCurrencyError{Input: s, Reason: "more than 9 decimal places"}
+		}
+		// One empty side is fine, two are not: a bare "." used to rewrite the
+		// left side to "0", pad the right to nine zeros, and parse the
+		// resulting "0000000000" as a successful zero.
+		if left == "" && right == "" {
+			return 0, &InvalidCurrencyError{Input: s, Reason: "no digits"}
 		}
 		// Allow ".5" → whole = 0
 		if left == "" {
