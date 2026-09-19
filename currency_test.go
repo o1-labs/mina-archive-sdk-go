@@ -127,10 +127,28 @@ func TestCurrencyCompare(t *testing.T) {
 }
 
 func TestCurrencyRejectsBadInput(t *testing.T) {
-	cases := []string{"abc", "", "-1", "1.0000000001", "1.2.3"}
+	// "." and "5.." are the ones that used to slip through: both sides of the
+	// decimal point empty meant the padding produced a parseable "0000000000".
+	cases := []string{"abc", "", "-1", "1.0000000001", "1.2.3", ".", " . "}
 	for _, in := range cases {
 		if _, err := CurrencyFromMina(in); err == nil {
 			t.Errorf("expected error for %q", in)
+		}
+	}
+
+	// One empty side stays legal, and TrimSpace is documented behaviour.
+	for in, want := range map[string]uint64{
+		".5":  500000000,
+		"5.":  5000000000,
+		" 5 ": 5000000000,
+	} {
+		c, err := CurrencyFromMina(in)
+		if err != nil {
+			t.Errorf("CurrencyFromMina(%q): %v", in, err)
+			continue
+		}
+		if c.Nanomina() != want {
+			t.Errorf("CurrencyFromMina(%q) = %d, want %d", in, c.Nanomina(), want)
 		}
 	}
 }

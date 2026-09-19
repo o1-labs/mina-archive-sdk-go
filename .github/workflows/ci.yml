@@ -9,8 +9,11 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        go: ['1.21', '1.22']
+        # The README promises Go >= 1.21, so verify the floor. 'stable' covers
+        # the current release, which the pinned pair did not.
+        go: ['1.21', '1.22', 'stable']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
