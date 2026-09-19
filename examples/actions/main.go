@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	archive "github.com/o1-labs/mina-archive-sdk-go"
+	archive "github.com/o1-labs/mina-archive-sdk-go/v2"
 )
 
 func main() {
@@ -36,7 +36,13 @@ func main() {
 	if len(actions) < limit {
 		limit = len(actions)
 	}
+	// [ActionOutput]! has nullable elements: the list is always present, but any
+	// element may be nil, so guard each one.
 	for _, g := range actions[:limit] {
+		if g == nil {
+			fmt.Println("  (null action group)")
+			continue
+		}
 		height := "?"
 		if g.BlockInfo != nil {
 			height = fmt.Sprintf("%d", g.BlockInfo.Height)

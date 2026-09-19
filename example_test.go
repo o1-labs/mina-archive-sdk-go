@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	archive "github.com/o1-labs/mina-archive-sdk-go"
+	archive "github.com/o1-labs/mina-archive-sdk-go/v2"
 )
 
 // The snippet in doc.go's "Basic usage" block used to be prose, and it did not

@@ -31,4 +31,30 @@
 // Companion to MinaProtocol/mina-sdk-go (the Mina daemon GraphQL client) —
 // this SDK targets the separate Archive Node GraphQL endpoint defined by
 // o1-labs/Archive-Node-API.
+//
+// # Nullable elements
+//
+// GetEvents, GetActions and GetBlocks return []*T. The SDL types these [T]!:
+// the list itself is always present, but every element is nullable, and the
+// server may keep returning null there indefinitely — under the upstream
+// versioning policy T -> T! is the only safe direction, so a null element
+// never becomes a breaking change. Guard each element before use. The same
+// holds for EventData.Data, ActionData.Data ([]*string),
+// TransactionInfo.ZkappAccountUpdateIDs ([]*int) and both FailureReason
+// fields (*string), where a value type would decode null to a zero value
+// indistinguishable from real data.
+//
+// GetVerificationKeyUpdates is the exception: its SDL type is
+// [VerificationKeyUpdate!]!, elements included, so it returns values.
 package archive
+
+// SchemaVersion is the Archive-Node-API schema version this module speaks.
+//
+// This constant — not the module version — is the compatibility check. The
+// module version is plain semver about the SDK's own surface, so an SDK-only
+// breaking change can take a major without claiming the schema moved.
+//
+// The schema is additive within a major version, so a module whose
+// SchemaVersion major matches the server keeps working against a newer server;
+// it simply cannot reach what was added after it.
+const SchemaVersion = "1.0"
