@@ -138,30 +138,52 @@ total := coinbase.Add(fee)
 
 ### Error handling
 
-All public errors implement `error`. Match with `errors.As`:
+Every error a query can return is one of the types below, and the list is
+exhaustive — no query path returns a bare `fmt.Errorf` value.
+
+| Type | Means | Retried? |
+| --- | --- | --- |
+| `*InvalidInputError` | The client rejected the request before sending it — a GraphQL `Int` out of range, or variables that will not marshal. **No HTTP request is made.** | — |
+| `*RateLimitError` | HTTP 429. `RetryAfter` says how long to wait. | yes |
+| `*GraphQLError` | A populated `errors` array. Deterministic, so not retried. `Data` may hold a partial payload. | no |
+| `*HTTPError` | A non-2xx that is not GraphQL-shaped — usually a wrong URL path. `Body` is the raw response, truncated. | no |
+| `*DecodeError` | HTTP 200 whose body is not a readable GraphQL response, or whose `data` does not fit the typed result. | no |
+| `*MissingFieldError` | A well-formed envelope missing the field the query asked for — including a bare `{}`, which has no `data` at all. | no |
+| `*ConnectionError` | Retries exhausted against transport/5xx failures, **or** the context was cancelled during backoff. `Unwrap` exposes the cause, so `errors.Is(err, context.DeadlineExceeded)` works. | exhausted |
 
 ```go
 import "errors"
 
 _, err := client.GetEvents(ctx, ...)
-var gqlErr *archive.GraphQLError
-var rateErr *archive.RateLimitError
-var httpErr *archive.HTTPError
-var connErr *archive.ConnectionError
-var missErr *archive.MissingFieldError
+var (
+    invErr  *archive.InvalidInputError
+    rateErr *archive.RateLimitError
+    gqlErr  *archive.GraphQLError
+    httpErr *archive.HTTPError
+    decErr  *archive.DecodeError
+    missErr *archive.MissingFieldError
+    connErr *archive.ConnectionError
+)
 switch {
+case errors.As(err, &invErr):
+    // Rejected locally; nothing was sent. invErr.Field names the offender.
 case errors.As(err, &rateErr):
     // Rate limited. rateErr.RetryAfter says how long to wait.
 case errors.As(err, &gqlErr):
     // Server-side validation, malformed query, etc. Not retried.
 case errors.As(err, &httpErr):
     // A non-2xx that is not GraphQL-shaped — often a wrong URL path.
-case errors.As(err, &connErr):
-    // Exhausted retries (network / 5xx). Inspect connErr.LastError.
+case errors.As(err, &decErr):
+    // HTTP 200 that is not a GraphQL response. decErr.Body shows what came back.
 case errors.As(err, &missErr):
     // Server returned an unexpected shape — likely a schema mismatch.
+case errors.As(err, &connErr):
+    // Exhausted retries, or cancelled mid-backoff. Inspect connErr.LastError.
 }
 ```
+
+`Currency` adds `*InvalidCurrencyError` and `*CurrencyUnderflowError`, which no
+query path returns.
 
 #### Contract error codes
 

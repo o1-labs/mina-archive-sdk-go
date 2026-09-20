@@ -3,11 +3,11 @@ name: Schema Drift
 on:
   schedule:
     - cron: '0 13 * * 1'  # Mondays 13:00 UTC
+  # Deliberately unfiltered, so the README's "weekly and on PR" is true. The
+  # path filter that used to be here meant a PR editing types.go or queries.go
+  # without touching schema.graphql was never drift-checked — exactly the PR
+  # that could desynchronise the models from the schema.
   pull_request:
-    paths:
-      - 'schema.graphql'
-      - 'scripts/check_schema_drift.sh'
-      - '.github/workflows/schema-drift.yml'
   workflow_dispatch:
 
 jobs:

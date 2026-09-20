@@ -32,6 +32,15 @@ const (
 // EventFilterOptionsInput filters events from a specific account.
 //
 // Use zero/nil values to omit a field — only Address is required.
+//
+// The server caps the block scan range at BLOCK_RANGE_SIZE (10,000 by
+// default). The SDL warns that **you can get a partial result if you do not
+// specify both From and To** — an unbounded query is not "everything", it is
+// "as much as fits". Page through a wide history with explicit bounds.
+//
+// From and To are GraphQL Int, which is signed 32-bit; a value outside that
+// range is rejected locally with an *InvalidInputError before any request is
+// sent.
 type EventFilterOptionsInput struct {
 	Address string            // required
 	TokenID string            // optional
@@ -41,6 +50,15 @@ type EventFilterOptionsInput struct {
 }
 
 // ActionFilterOptionsInput filters actions from a specific account.
+//
+// The server caps the block scan range at BLOCK_RANGE_SIZE (10,000 by
+// default). The SDL warns that **you can get a partial result if you do not
+// specify both From and To** — an unbounded query is not "everything", it is
+// "as much as fits". Page through a wide history with explicit bounds.
+//
+// From and To are GraphQL Int, which is signed 32-bit; a value outside that
+// range is rejected locally with an *InvalidInputError before any request is
+// sent.
 type ActionFilterOptionsInput struct {
 	Address         string
 	TokenID         string
@@ -300,7 +318,7 @@ type Block struct {
 
 // toEventInput converts the public input struct into the GraphQL JSON shape.
 // Empty/zero fields are omitted so the server applies its defaults.
-func (in EventFilterOptionsInput) toMap() map[string]any {
+func (in EventFilterOptionsInput) toMap(queryName string) (map[string]any, error) {
 	m := map[string]any{"address": in.Address}
 	if in.TokenID != "" {
 		m["tokenId"] = in.TokenID
@@ -309,15 +327,21 @@ func (in EventFilterOptionsInput) toMap() map[string]any {
 		m["status"] = string(in.Status)
 	}
 	if in.From != nil {
+		if err := checkInt32(queryName, "from", *in.From); err != nil {
+			return nil, err
+		}
 		m["from"] = *in.From
 	}
 	if in.To != nil {
+		if err := checkInt32(queryName, "to", *in.To); err != nil {
+			return nil, err
+		}
 		m["to"] = *in.To
 	}
-	return m
+	return m, nil
 }
 
-func (in ActionFilterOptionsInput) toMap() map[string]any {
+func (in ActionFilterOptionsInput) toMap(queryName string) (map[string]any, error) {
 	m := map[string]any{"address": in.Address}
 	if in.TokenID != "" {
 		m["tokenId"] = in.TokenID
@@ -326,9 +350,15 @@ func (in ActionFilterOptionsInput) toMap() map[string]any {
 		m["status"] = string(in.Status)
 	}
 	if in.From != nil {
+		if err := checkInt32(queryName, "from", *in.From); err != nil {
+			return nil, err
+		}
 		m["from"] = *in.From
 	}
 	if in.To != nil {
+		if err := checkInt32(queryName, "to", *in.To); err != nil {
+			return nil, err
+		}
 		m["to"] = *in.To
 	}
 	if in.FromActionState != "" {
@@ -337,10 +367,16 @@ func (in ActionFilterOptionsInput) toMap() map[string]any {
 	if in.EndActionState != "" {
 		m["endActionState"] = in.EndActionState
 	}
-	return m
+	return m, nil
 }
 
-func (in VerificationKeyUpdateFilterInput) toMap() map[string]any {
+func (in VerificationKeyUpdateFilterInput) toMap(queryName string) (map[string]any, error) {
+	if err := checkInt32(queryName, "from", in.From); err != nil {
+		return nil, err
+	}
+	if err := checkInt32(queryName, "to", in.To); err != nil {
+		return nil, err
+	}
 	m := map[string]any{
 		"verificationKeyHash": in.VerificationKeyHash,
 		"from":                in.From,
@@ -349,15 +385,21 @@ func (in VerificationKeyUpdateFilterInput) toMap() map[string]any {
 	if in.Status != "" {
 		m["status"] = string(in.Status)
 	}
-	return m
+	return m, nil
 }
 
-func (in BlockQueryInput) toMap() map[string]any {
+func (in BlockQueryInput) toMap(queryName string) (map[string]any, error) {
 	m := map[string]any{}
 	if in.BlockHeightGte != nil {
+		if err := checkInt32(queryName, "blockHeight_gte", *in.BlockHeightGte); err != nil {
+			return nil, err
+		}
 		m["blockHeight_gte"] = *in.BlockHeightGte
 	}
 	if in.BlockHeightLt != nil {
+		if err := checkInt32(queryName, "blockHeight_lt", *in.BlockHeightLt); err != nil {
+			return nil, err
+		}
 		m["blockHeight_lt"] = *in.BlockHeightLt
 	}
 	if in.DateTimeGte != "" {
@@ -372,7 +414,7 @@ func (in BlockQueryInput) toMap() map[string]any {
 	if in.InBestChain != nil {
 		m["inBestChain"] = *in.InBestChain
 	}
-	return m
+	return m, nil
 }
 
 // graphqlRequest / graphqlResponse are wire-level wrappers.
