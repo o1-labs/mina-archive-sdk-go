@@ -79,9 +79,17 @@ client := archive.NewClient(
     archive.WithRetries(5),
     archive.WithRetryDelay(10*time.Second),
     archive.WithTimeout(60*time.Second),
+    archive.WithMaxRetryAfter(60*time.Second),
     archive.WithHeader("X-Api-Key", os.Getenv("API_KEY")),
 )
 ```
+
+**`WithTimeout` does not bound a `Retry-After` wait.** It bounds one HTTP
+request. Honouring a 429's `Retry-After` means sleeping between attempts, which
+no request timeout covers — `Retry-After: 86400` would park the call for a day.
+`WithMaxRetryAfter` (default 60s) is the ceiling: above it the call returns
+`*RateLimitError` immediately, carrying the requested delay, so you decide
+whether to wait, queue or fail.
 
 ### Dates and times
 
@@ -102,10 +110,14 @@ t, err := blockInfo.Time() // parses Unix epoch milliseconds
 t, err := block.Time()     // parses ISO-8601
 ```
 
-On input, `DateTimeGte` / `DateTimeLt` must be ISO-8601. The server coerces them with
-JavaScript's `new Date(value).getTime()`, and a value it cannot parse becomes `NaN`,
-which reaches SQL as the string `"NaN"` and **matches nothing without erroring** —
-HTTP 200, empty list, no diagnostic anywhere:
+On input, `DateTimeGte` / `DateTimeLt` are `*time.Time`, set with
+`SetDateTimeRange` or `archive.TimePtr`. The SDK formats them, so the hazard
+below is unreachable through this SDK — it is documented because it is the
+server behaviour any hand-built query still meets.
+
+The server coerces the bound with JavaScript's `new Date(value).getTime()`, and a
+value it cannot parse becomes `NaN`, which reaches SQL as the string `"NaN"` and
+**matches nothing without erroring** — HTTP 200, empty list, no diagnostic anywhere:
 
 ```text
 "2023-08-14T00:00:00Z"  -> 1691971200000    ok

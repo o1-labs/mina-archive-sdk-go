@@ -92,7 +92,13 @@ func TestIntegration(t *testing.T) {
 		// Assert content, not nil-ness. A renamed field or a changed scalar
 		// encoding has to fail here.
 		var withBlockInfo int
-		for _, group := range events {
+		for i, group := range events {
+			// The element is *EventOutput: a wire null is a nil element, and
+			// dereferencing it panics the suite instead of reporting a defect.
+			if group == nil {
+				t.Errorf("events[%d] is null", i)
+				continue
+			}
 			if group.BlockInfo == nil {
 				continue
 			}
@@ -129,7 +135,11 @@ func TestIntegration(t *testing.T) {
 		}
 
 		var withBlockInfo int
-		for _, group := range actions {
+		for i, group := range actions {
+			if group == nil {
+				t.Errorf("actions[%d] is null", i)
+				continue
+			}
 			if group.BlockInfo == nil {
 				continue
 			}
@@ -192,6 +202,11 @@ func TestIntegration(t *testing.T) {
 		}
 		if len(blocks) == 0 {
 			t.Fatal("no canonical blocks; the fixture holds 24 of them")
+		}
+		for i, b := range blocks {
+			if b == nil {
+				t.Fatalf("blocks[%d] is null; every assertion below dereferences it", i)
+			}
 		}
 		if len(blocks) >= 2 && blocks[0].BlockHeight < blocks[1].BlockHeight {
 			t.Errorf("DESC sort not honored: %d < %d", blocks[0].BlockHeight, blocks[1].BlockHeight)

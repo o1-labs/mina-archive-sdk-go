@@ -94,12 +94,14 @@ type VerificationKeyUpdateFilterInput struct {
 type BlockQueryInput struct {
 	BlockHeightGte *int // inclusive
 	BlockHeightLt  *int // exclusive
-	// DateTimeGte is the inclusive lower bound, ISO-8601. See the type doc for
-	// the silent-empty-result hazard; prefer SetDateTimeRange.
-	DateTimeGte string
-	// DateTimeLt is the exclusive upper bound, ISO-8601. See the type doc for
-	// the silent-empty-result hazard; prefer SetDateTimeRange.
-	DateTimeLt  string
+	// DateTimeGte is the inclusive lower bound. nil leaves it unset.
+	//
+	// Typed rather than a preformatted string: the server's silent-empty-result
+	// behaviour above is unreachable when the SDK owns the formatting, and a
+	// string field let a caller bypass DateTimeFilter and hit exactly that.
+	DateTimeGte *time.Time
+	// DateTimeLt is the exclusive upper bound. nil leaves it unset.
+	DateTimeLt  *time.Time
 	Canonical   *bool
 	InBestChain *bool
 }
@@ -142,11 +144,16 @@ func DateTimeFilter(t time.Time) string {
 // A zero time.Time leaves that bound unset.
 func (in *BlockQueryInput) SetDateTimeRange(gte, lt time.Time) {
 	if !gte.IsZero() {
-		in.DateTimeGte = DateTimeFilter(gte)
+		in.DateTimeGte = TimePtr(gte)
 	}
 	if !lt.IsZero() {
-		in.DateTimeLt = DateTimeFilter(lt)
+		in.DateTimeLt = TimePtr(lt)
 	}
+}
+
+// TimePtr returns a pointer to t, for setting DateTimeGte/DateTimeLt inline.
+func TimePtr(t time.Time) *time.Time {
+	return &t
 }
 
 // VerificationKeyUpdate is an applied account update that set a verification key.
@@ -402,11 +409,11 @@ func (in BlockQueryInput) toMap(queryName string) (map[string]any, error) {
 		}
 		m["blockHeight_lt"] = *in.BlockHeightLt
 	}
-	if in.DateTimeGte != "" {
-		m["dateTime_gte"] = in.DateTimeGte
+	if in.DateTimeGte != nil {
+		m["dateTime_gte"] = DateTimeFilter(*in.DateTimeGte)
 	}
-	if in.DateTimeLt != "" {
-		m["dateTime_lt"] = in.DateTimeLt
+	if in.DateTimeLt != nil {
+		m["dateTime_lt"] = DateTimeFilter(*in.DateTimeLt)
 	}
 	if in.Canonical != nil {
 		m["canonical"] = *in.Canonical
