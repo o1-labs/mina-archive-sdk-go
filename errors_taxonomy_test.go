@@ -213,3 +213,71 @@ func TestCancellationDuringBackoffIsAlwaysConnectionError(t *testing.T) {
 		t.Errorf("errors.Is(err, context.Canceled) = false; Unwrap must expose the cause")
 	}
 }
+
+// WithTimeout bounds one HTTP request; it never covered the sleep between
+// attempts, so a server answering Retry-After: 3600 parked the call for an
+// hour whatever the timeout said. Above the ceiling the call returns at once.
+func TestRetryAfterBeyondTheCeilingReturnsAtOnce(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"Too many requests"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(
+		WithGraphQLURI(srv.URL),
+		WithRetries(3),
+		WithRetryDelay(0),
+		WithMaxRetryAfter(60*time.Second),
+	)
+
+	started := time.Now()
+	_, err := c.GetNetworkState(context.Background())
+	elapsed := time.Since(started)
+
+	var rateErr *RateLimitError
+	if !errors.As(err, &rateErr) {
+		t.Fatalf("error = %v, want *RateLimitError", err)
+	}
+	if rateErr.RetryAfter != 3600*time.Second {
+		t.Errorf("RetryAfter = %v, want the server's 3600s", rateErr.RetryAfter)
+	}
+	// The point of the fix: it returned instead of sleeping.
+	if elapsed > 5*time.Second {
+		t.Errorf("call took %v; it slept on Retry-After instead of returning", elapsed)
+	}
+}
+
+// Within the ceiling, Retry-After is still honoured and the retry still wins.
+func TestRetryAfterWithinTheCeilingIsHonoured(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"errors":[{"message":"Too many requests"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"networkState":{"maxBlockHeight":{"canonicalMaxBlockHeight":42,"pendingMaxBlockHeight":43}}}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(
+		WithGraphQLURI(srv.URL),
+		WithRetries(3),
+		WithRetryDelay(0),
+		WithMaxRetryAfter(60*time.Second),
+	)
+	state, err := c.GetNetworkState(context.Background())
+	if err != nil {
+		t.Fatalf("GetNetworkState: %v", err)
+	}
+	if state.MaxBlockHeight == nil || state.MaxBlockHeight.CanonicalMaxBlockHeight != 42 {
+		t.Errorf("canonical max height = %+v, want 42", state.MaxBlockHeight)
+	}
+	if calls != 2 {
+		t.Errorf("server saw %d calls, want 2 (one 429, one success)", calls)
+	}
+}

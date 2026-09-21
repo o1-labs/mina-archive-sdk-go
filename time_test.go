@@ -117,3 +117,23 @@ func TestSetDateTimeRange(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The date bounds are *time.Time, so a caller cannot hand the server a string
+// it parses to NaN. Whatever the caller sets, the wire value comes from
+// DateTimeFilter — including a non-UTC zone, which normalises to UTC.
+func TestDateBoundsAlwaysSerialiseThroughDateTimeFilter(t *testing.T) {
+	loc := time.FixedZone("UTC+5", 5*60*60)
+	gte := time.UnixMilli(1691971200000).In(loc)
+	in := BlockQueryInput{DateTimeGte: TimePtr(gte)}
+
+	m, err := in.toMap("TestDateBounds")
+	if err != nil {
+		t.Fatalf("toMap: %v", err)
+	}
+	if got := m["dateTime_gte"]; got != "2023-08-14T00:00:00.000Z" {
+		t.Errorf("dateTime_gte = %v, want the UTC-normalised filter value", got)
+	}
+	if _, ok := m["dateTime_lt"]; ok {
+		t.Error("dateTime_lt must stay out of the payload when nil")
+	}
+}

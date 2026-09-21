@@ -54,6 +54,18 @@ func WithTimeout(d time.Duration) ClientOption {
 //
 // The SDK treats the client as borrowed: it never writes to it, and Close does
 // not touch its idle connections.
+// WithMaxRetryAfter caps how long a server-supplied Retry-After may park a
+// call. Default 60s.
+//
+// WithTimeout bounds one HTTP request; it does not cover the sleep between
+// attempts, so without this a Retry-After of 86400 blocks the call for a day.
+// Above the ceiling the call returns *RateLimitError at once, carrying the
+// requested delay, so the caller decides whether to wait, queue or fail.
+// Zero never waits on Retry-After.
+func WithMaxRetryAfter(d time.Duration) ClientOption {
+	return func(c *Client) { c.maxRetryAfter = d }
+}
+
 func WithHTTPClient(hc *http.Client) ClientOption {
 	return func(c *Client) {
 		c.httpClient = hc
@@ -83,8 +95,11 @@ type Client struct {
 	retries    int
 	retryDelay time.Duration
 	timeout    time.Duration
-	headers    http.Header
-	httpClient *http.Client
+	// maxRetryAfter caps a server-supplied Retry-After. timeout is applied per
+	// request and never covered the sleep between attempts.
+	maxRetryAfter time.Duration
+	headers       http.Header
+	httpClient    *http.Client
 	// ownsHTTPClient is false once WithHTTPClient has supplied one, so the
 	// SDK knows not to write to or close an object it does not own.
 	ownsHTTPClient bool
@@ -95,10 +110,11 @@ type Client struct {
 // local URI, 3 retries with 5s backoff, 30s per-request timeout.
 func NewClient(opts ...ClientOption) *Client {
 	c := &Client{
-		uri:        DefaultGraphQLURI,
-		retries:    3,
-		retryDelay: 5 * time.Second,
-		timeout:    30 * time.Second,
+		uri:           DefaultGraphQLURI,
+		retries:       3,
+		retryDelay:    5 * time.Second,
+		timeout:       30 * time.Second,
+		maxRetryAfter: 60 * time.Second,
 		// No Timeout field here — the deadline is applied per request, so the
 		// behaviour is the same whether this client or the caller's is used.
 		httpClient:     &http.Client{},
@@ -241,11 +257,19 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 		if resp.StatusCode == http.StatusTooManyRequests {
 			rateErr := newRateLimitError(queryName, resp.Header, body)
 			c.logf("GraphQL %s rate limited, retry after %s", queryName, rateErr.RetryAfter)
+			// Wait only when the server's ask is within the ceiling. timeout
+			// bounds a request, not this sleep, so an unbounded wait here is
+			// unbounded for the whole call.
+			wait := rateErr.RetryAfter
+			if wait <= 0 {
+				wait = c.retryDelay
+			}
+			if wait > c.maxRetryAfter {
+				c.logf("GraphQL %s retry-after %s exceeds the %s ceiling; not waiting",
+					queryName, wait, c.maxRetryAfter)
+				return nil, rateErr
+			}
 			if attempt < c.retries {
-				wait := rateErr.RetryAfter
-				if wait <= 0 {
-					wait = c.retryDelay
-				}
 				if waitErr := sleepCtx(ctx, wait); waitErr != nil {
 					return nil, &ConnectionError{
 						QueryName: queryName,
