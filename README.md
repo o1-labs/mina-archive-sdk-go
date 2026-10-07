@@ -56,10 +56,10 @@ Each method on `*Client` maps 1:1 to a GraphQL query in the [Archive-Node-API sc
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `GetEvents(ctx, input)` | `[]*EventOutput` | Events emitted by a zkApp account, optionally filtered by block range and consensus status. |
-| `GetActions(ctx, input)` | `[]*ActionOutput` | Actions dispatched from a zkApp account. |
+| `GetEvents(ctx, input)` | `[]EventOutput` | Events emitted by a zkApp account, optionally filtered by block range and consensus status. |
+| `GetActions(ctx, input)` | `[]ActionOutput` | Actions dispatched from a zkApp account. |
 | `GetNetworkState(ctx)` | `*NetworkStateOutput` | Archive's max canonical / pending block heights. |
-| `GetBlocks(ctx, opts)` | `[]*Block` | Blocks filtered by height/date range and chain status. Transaction detail needs `ENABLE_BLOCK_TRANSACTION_DETAILS` on the server — see below. |
+| `GetBlocks(ctx, opts)` | `[]Block` | Blocks filtered by height/date range and chain status. Transaction detail needs `ENABLE_BLOCK_TRANSACTION_DETAILS` on the server — see below. |
 | `GetVerificationKeyUpdates(ctx, in)` | `[]VerificationKeyUpdate` | Applied account updates that set a given verification key, within a required block range. |
 | `ExecuteQuery(ctx, gql, vars, name)` | `json.RawMessage` | Low-level escape hatch returning the raw `data` field. |
 
@@ -276,56 +276,39 @@ See `examples/`:
 - `blocks/` — get the latest canonical blocks with currency parsing
 - `networkstate/` — check archive sync state
 
-## Nullable elements
+## Nullable positions
 
-`GetEvents`, `GetActions` and `GetBlocks` return `[]*T`. The SDL types these
-`[T]!`: the list itself is always present, but **every element is nullable**,
-and the server is free to return `null` there indefinitely — under the upstream
-versioning policy `T` → `T!` is the only safe direction, so a null element
-never becomes a breaking change.
+Schema 2.0 makes the list elements this SDK reads non-null, so `GetEvents`,
+`GetActions` and `GetBlocks` return `[]T`, and `EventData.Data`,
+`ActionData.Data` (`[]string`) and `TransactionInfo.ZkappAccountUpdateIDs`
+(`[]int`) hold values.
 
-The same holds for `EventData.Data`, `ActionData.Data` (`[]*string`),
-`TransactionInfo.ZkappAccountUpdateIDs` (`[]*int`) and both `FailureReason`
-fields (`*string`). A value type in those positions decoded a `null` to a zero
-value indistinguishable from real data: a null `[Block]` element became a block
-at height 0 with empty hashes, a null id became id 0, and
-`FailureReason == ""` could not tell "did not fail" from "failed with an empty
-reason".
+Two lists stay nullable as a whole: `EventOutput.EventData` (`[EventData!]`)
+and `ActionOutput.ActionData` (`[ActionData!]`). A `null` decodes to a nil
+slice, an empty list to a non-nil empty slice.
 
-`GetVerificationKeyUpdates` is the exception: its SDL type is
-`[VerificationKeyUpdate!]!`, elements included, so it returns values.
+Both `FailureReason` fields are nullable scalars and stay `*string`: `nil` means
+the command did not fail, a non-nil `""` means it failed with an empty reason.
 
 ## Version compatibility
 
 The module exports the schema version it speaks:
 
 ```go
-archive.SchemaVersion // "1.0" — the Archive-Node-API schema major.minor
+archive.SchemaVersion // "2.0" — the Archive-Node-API schema major.minor
 ```
 
-**`SchemaVersion`, not the module version, is the compatibility check.** The
-module version is plain semver about the SDK's own surface:
+**The SDK major equals the server major. Same major = compatible.** A server
+with a higher minor only adds features that this SDK may not wrap yet; use
+`ExecuteQuery` to reach them.
+
+Within a major, the module version is semver about the SDK's own surface:
 
 | Part | Meaning |
 | --- | --- |
-| **Major** | A breaking change to the SDK's API — whether the schema forced it or not. |
+| **Major** | Follows the server major: a breaking schema change. |
 | **Minor** | Additive: a new query, a new option, a new helper. |
 | **Patch** | Fixes, docs, dependencies. |
-
-The two still move together in the common cases: a breaking schema change
-breaks the SDK surface, so it takes a major, and a schema minor that adds a
-query is an SDK minor. What separates them is an **SDK-only** breaking change,
-which now has a home. v2 is exactly that — it moved six positions to pointer
-form so the `null`s the 1.0 schema always permitted stop decoding to zero
-values, and it speaks the same `1.0` schema v1 did.
-
-The schema is additive within a major version, so a module whose
-`SchemaVersion` major matches the server keeps working against a newer server;
-it simply cannot reach what was added after it.
-
-Earlier releases followed a stricter rule in which the module's major.minor
-*was* the schema version. That rule left no position for a breaking SDK-only
-fix, which is why it was amended in v2.
 
 ### Migrating from v1 to v2
 
@@ -335,32 +318,15 @@ The import path carries the major, as Go requires:
 archive "github.com/o1-labs/mina-archive-sdk-go/v2"
 ```
 
-`GetEvents`, `GetActions` and `GetBlocks` now return `[]*T`, and six positions
-moved to pointer form. Field access through a non-nil element is unchanged —
-Go dereferences transparently — so the compiler will only stop you where you
-compare or copy a value:
+- `EventOutput.EventData` and `ActionOutput.ActionData` change from `[]*T` to
+  `[]T`: their elements are non-null in schema 2.0.
+- `FailureReason` changes from `string` to `*string`, so
+  `cmd.FailureReason != ""` becomes `cmd.FailureReason != nil`.
+- `BlockQueryInput.DateTimeGte` / `DateTimeLt` change from `string` to
+  `*time.Time` — see [Dates and times](#dates-and-times).
 
-```go
-// v1 — a null element silently became a Block at height 0
-for _, b := range blocks {
-    fmt.Println(b.BlockHeight)
-}
-
-// v2 — the nil is visible
-for _, b := range blocks {
-    if b == nil {
-        continue
-    }
-    fmt.Println(b.BlockHeight)
-}
-```
-
-`FailureReason` changes from `string` to `*string`, so `cmd.FailureReason != ""`
-becomes `cmd.FailureReason != nil`. `Data` and `ZkappAccountUpdateIDs` members
-need a dereference.
-
-`GetNetworkState` and `GetVerificationKeyUpdates` are unchanged —
-`[VerificationKeyUpdate!]!` has non-nullable elements and was already correct.
+`GetEvents`, `GetActions`, `GetBlocks`, `GetNetworkState` and
+`GetVerificationKeyUpdates` keep their v1 return types.
 
 ## Development
 

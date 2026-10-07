@@ -79,16 +79,41 @@ input VerificationKeyUpdateFilterInput {
   status: BlockStatusFilter
 }
 
+"""
+Filter successful zkApp commands by block range.
+
+Both `from` and `to` are required. The range is bounded by `ZKAPP_COMMAND_RANGE_SIZE`, and the server may reject dense ranges that expand to too many account updates.
+"""
+input ZkappCommandFilterOptionsInput {
+  blockStatus: BlockStatusFilter
+  """
+  Mina block height to filter zkApp commands from, inclusive
+  """
+  from: Int!
+  """
+  Mina block height to filter zkApp commands to, exclusive
+  """
+  to: Int!
+  """
+  Optional account update public key filter.
+  """
+  accountPublicKey: String
+  """
+  Optional account update token id filter.
+  """
+  tokenId: String
+}
+
 type EventData {
   accountUpdateId: String!
   transactionInfo: TransactionInfo
-  data: [String]!
+  data: [String!]!
 }
 
 type ActionData {
   accountUpdateId: String!
   transactionInfo: TransactionInfo
-  data: [String]!
+  data: [String!]!
 }
 
 type BlockInfo {
@@ -114,7 +139,7 @@ type TransactionInfo {
   memo: String!
   authorizationKind: String!
   sequenceNumber: Int!
-  zkappAccountUpdateIds: [Int]!
+  zkappAccountUpdateIds: [Int!]!
 }
 
 type VerificationKeyUpdate {
@@ -136,14 +161,65 @@ type ActionStates {
 
 type EventOutput {
   blockInfo: BlockInfo
-  eventData: [EventData]
+  eventData: [EventData!]
 }
 
 type ActionOutput {
   blockInfo: BlockInfo
   transactionInfo: TransactionInfo
-  actionData: [ActionData]
+  actionData: [ActionData!]
   actionState: ActionStates!
+}
+
+"""
+Raw field array from the archive database.
+
+An empty `fields` array means the archive row exists but contains no field values.
+Nullable entries mean the corresponding nullable archive state slot has no field value.
+"""
+type ZkappFieldArray {
+  fields: [String]!
+}
+
+type ZkappAccountPrecondition {
+  state: ZkappFieldArray
+  actionState: ZkappFieldArray
+  provedState: Boolean
+  isNew: Boolean
+}
+
+type ZkappGlobalSlotBounds {
+  lowerBound: Int
+  upperBound: Int
+}
+
+type ZkappNetworkPrecondition {
+  globalSlotSinceGenesis: ZkappGlobalSlotBounds
+}
+
+type ZkappAccountUpdateOutput {
+  id: String!
+  publicKey: String!
+  tokenId: String!
+  authorizationKind: String!
+  balanceChange: String!
+  incrementNonce: Boolean!
+  callDepth: Int!
+  actions: [ZkappFieldArray!]!
+  events: [ZkappFieldArray!]!
+  appState: ZkappFieldArray
+  accountPrecondition: ZkappAccountPrecondition
+  networkPrecondition: ZkappNetworkPrecondition
+}
+
+type ZkappCommandOutput {
+  blockInfo: BlockInfo!
+  hash: String!
+  feePayer: String!
+  fee: String!
+  memo: String!
+  sequenceNumber: Int!
+  accountUpdates: [ZkappAccountUpdateOutput!]!
 }
 
 """
@@ -236,11 +312,28 @@ type Block {
 }
 
 type Query {
-  events(input: EventFilterOptionsInput!): [EventOutput]!
-  actions(input: ActionFilterOptionsInput!): [ActionOutput]!
+  """
+  The `MAJOR.MINOR` version of this schema.
+
+  Clients compare it with the schema version they were built against: an equal
+  major means the contract they code against still holds, and a higher minor
+  means this server has additive changes they may not know about yet.
+
+  Always available, even when `ENABLED_QUERIES` restricts which data queries
+  this server exposes — a compatibility check that can itself be switched off
+  is of no use to a client.
+  """
+  schemaVersion: String!
+  events(input: EventFilterOptionsInput!): [EventOutput!]!
+  actions(input: ActionFilterOptionsInput!): [ActionOutput!]!
   verificationKeyUpdates(
     input: VerificationKeyUpdateFilterInput!
   ): [VerificationKeyUpdate!]!
+  zkappCommands(input: ZkappCommandFilterOptionsInput!): [ZkappCommandOutput!]!
   networkState: NetworkStateOutput!
-  blocks(query: BlockQueryInput, limit: Int, sortBy: BlockSortByInput): [Block]!
+  blocks(
+    query: BlockQueryInput
+    limit: Int
+    sortBy: BlockSortByInput
+  ): [Block!]!
 }
