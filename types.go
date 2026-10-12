@@ -169,35 +169,26 @@ type VerificationKeyUpdate struct {
 
 // TransactionInfo describes the transaction that emitted an event/action.
 type TransactionInfo struct {
-	Status            string `json:"status"`
-	Hash              string `json:"hash"`
-	Memo              string `json:"memo"`
-	AuthorizationKind string `json:"authorizationKind"`
-	SequenceNumber    int    `json:"sequenceNumber"`
-	// ZkappAccountUpdateIDs is element-nullable in the SDL ([Int]!), so a
-	// member may be nil even though the list itself is always present. A value
-	// type here would decode a null to 0, indistinguishable from id 0.
-	ZkappAccountUpdateIDs []*int `json:"zkappAccountUpdateIds"`
+	Status                string `json:"status"`
+	Hash                  string `json:"hash"`
+	Memo                  string `json:"memo"`
+	AuthorizationKind     string `json:"authorizationKind"`
+	SequenceNumber        int    `json:"sequenceNumber"`
+	ZkappAccountUpdateIDs []int  `json:"zkappAccountUpdateIds"`
 }
 
 // EventData is one event record from the archive.
 type EventData struct {
 	AccountUpdateID string           `json:"accountUpdateId"`
 	TransactionInfo *TransactionInfo `json:"transactionInfo"`
-	// Data is element-nullable in the SDL ([String]!), so a member may be nil
-	// even though the list itself is always present. A value type here would
-	// decode a null to "", indistinguishable from an empty string.
-	Data []*string `json:"data"`
+	Data            []string         `json:"data"`
 }
 
 // ActionData is one action record from the archive.
 type ActionData struct {
 	AccountUpdateID string           `json:"accountUpdateId"`
 	TransactionInfo *TransactionInfo `json:"transactionInfo"`
-	// Data is element-nullable in the SDL ([String]!), so a member may be nil
-	// even though the list itself is always present. A value type here would
-	// decode a null to "", indistinguishable from an empty string.
-	Data []*string `json:"data"`
+	Data            []string         `json:"data"`
 }
 
 // BlockInfo carries the block-level metadata returned alongside an
@@ -228,16 +219,22 @@ type ActionStates struct {
 }
 
 // EventOutput is one entry returned from GetEvents.
+//
+// EventData is nullable as a whole ([EventData!]), so it may be nil; its
+// elements are not.
 type EventOutput struct {
-	BlockInfo *BlockInfo   `json:"blockInfo"`
-	EventData []*EventData `json:"eventData"`
+	BlockInfo *BlockInfo  `json:"blockInfo"`
+	EventData []EventData `json:"eventData"`
 }
 
 // ActionOutput is one entry returned from GetActions.
+//
+// ActionData is nullable as a whole ([ActionData!]), so it may be nil; its
+// elements are not.
 type ActionOutput struct {
 	BlockInfo       *BlockInfo       `json:"blockInfo"`
 	TransactionInfo *TransactionInfo `json:"transactionInfo"`
-	ActionData      []*ActionData    `json:"actionData"`
+	ActionData      []ActionData     `json:"actionData"`
 	ActionState     ActionStates     `json:"actionState"`
 }
 

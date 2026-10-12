@@ -42,13 +42,7 @@ func main() {
 	if len(events) < limit {
 		limit = len(events)
 	}
-	// [EventOutput]! has nullable elements: the list is always present, but any
-	// element may be nil, so guard each one.
 	for _, g := range events[:limit] {
-		if g == nil {
-			fmt.Println("  (null event group)")
-			continue
-		}
 		height := "?"
 		if g.BlockInfo != nil {
 			height = fmt.Sprintf("%d", g.BlockInfo.Height)

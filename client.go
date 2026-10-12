@@ -333,12 +333,7 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string, variables map[s
 // -- Typed queries --
 
 // GetEvents queries archived events for a zkApp account.
-//
-// The SDL types this [EventOutput]!: the list is always present but its
-// elements are nullable, so a returned element may be nil. Guard each one — a
-// value type here would silently decode a null element to a zero-value
-// EventOutput.
-func (c *Client) GetEvents(ctx context.Context, in EventFilterOptionsInput) ([]*EventOutput, error) {
+func (c *Client) GetEvents(ctx context.Context, in EventFilterOptionsInput) ([]EventOutput, error) {
 	input, err := in.toMap("GetEvents")
 	if err != nil {
 		return nil, err
@@ -348,7 +343,7 @@ func (c *Client) GetEvents(ctx context.Context, in EventFilterOptionsInput) ([]*
 		return nil, err
 	}
 	var result struct {
-		Events *[]*EventOutput `json:"events"`
+		Events *[]EventOutput `json:"events"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, &DecodeError{QueryName: "GetEvents", Body: truncate(string(data), 200), Err: err}
@@ -360,12 +355,7 @@ func (c *Client) GetEvents(ctx context.Context, in EventFilterOptionsInput) ([]*
 }
 
 // GetActions queries archived actions for a zkApp account.
-//
-// The SDL types this [ActionOutput]!: the list is always present but its
-// elements are nullable, so a returned element may be nil. Guard each one — a
-// value type here would silently decode a null element to a zero-value
-// ActionOutput.
-func (c *Client) GetActions(ctx context.Context, in ActionFilterOptionsInput) ([]*ActionOutput, error) {
+func (c *Client) GetActions(ctx context.Context, in ActionFilterOptionsInput) ([]ActionOutput, error) {
 	input, err := in.toMap("GetActions")
 	if err != nil {
 		return nil, err
@@ -375,7 +365,7 @@ func (c *Client) GetActions(ctx context.Context, in ActionFilterOptionsInput) ([
 		return nil, err
 	}
 	var result struct {
-		Actions *[]*ActionOutput `json:"actions"`
+		Actions *[]ActionOutput `json:"actions"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, &DecodeError{QueryName: "GetActions", Body: truncate(string(data), 200), Err: err}
@@ -413,13 +403,7 @@ type BlocksOptions struct {
 
 // GetBlocks queries blocks by the given filters. Pass an empty BlocksOptions{}
 // to get the default server-side selection.
-//
-// The SDL types this [Block]!: the list is always present but its elements are
-// nullable, so a returned element may be nil. Guard each one — a value type
-// here would silently decode a null element to a Block at height 0 with empty
-// hashes, which a caller would happily index, count, or feed into a max-height
-// calculation.
-func (c *Client) GetBlocks(ctx context.Context, opts BlocksOptions) ([]*Block, error) {
+func (c *Client) GetBlocks(ctx context.Context, opts BlocksOptions) ([]Block, error) {
 	vars := map[string]any{
 		"query":  nil,
 		"limit":  nil,
@@ -447,7 +431,7 @@ func (c *Client) GetBlocks(ctx context.Context, opts BlocksOptions) ([]*Block, e
 		return nil, err
 	}
 	var result struct {
-		Blocks *[]*Block `json:"blocks"`
+		Blocks *[]Block `json:"blocks"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, &DecodeError{QueryName: "GetBlocks", Body: truncate(string(data), 200), Err: err}
