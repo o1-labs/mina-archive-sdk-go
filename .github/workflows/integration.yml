@@ -18,7 +18,9 @@ on:
 
 env:
   ARCHIVE_NODE_API_REPO: o1-labs/Archive-Node-API
-  ARCHIVE_NODE_API_REF: main
+  # The release this SDK speaks (SCHEMA_VERSION / schema.graphql). Move it with
+  # each schema bump. The Schema Drift workflow still watches `main`.
+  ARCHIVE_NODE_API_REF: v2.1.0
 
 jobs:
   integration:
