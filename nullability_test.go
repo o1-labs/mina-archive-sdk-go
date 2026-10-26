@@ -105,6 +105,36 @@ func TestNullFailureReasonStaysDistinctFromEmptyString(t *testing.T) {
 	}
 }
 
+// UserCommandOutput.FailureReason (schema 2.1) follows the same convention as
+// the block-level UserCommand: nil for "did not fail", a non-nil "" for
+// "failed with an empty reason".
+func TestNullUserCommandOutputFailureReasonStaysDistinctFromEmptyString(t *testing.T) {
+	const blockInfo = `{"height":1,"stateHash":"sh","parentHash":"ph","ledgerHash":"lh","chainStatus":"canonical","timestamp":"0","globalSlotSinceHardfork":0,"globalSlotSinceGenesis":0,"distanceFromMaxBlockHeight":1}`
+	srv := httptest.NewServer(rawGraphQL(
+		`{"data":{"userCommands":[` +
+			`{"blockInfo":` + blockInfo + `,"sequenceNumber":0,"hash":"h1","kind":"payment","feePayer":"a","from":"a","to":"b","amount":"1","fee":"1","memo":"","nonce":0,"status":"applied","failureReason":null},` +
+			`{"blockInfo":` + blockInfo + `,"sequenceNumber":1,"hash":"h2","kind":"delegation","feePayer":"a","from":"a","to":"b","amount":"0","fee":"1","memo":"","nonce":1,"status":"failed","failureReason":""}` +
+			`]}}`,
+	))
+	defer srv.Close()
+
+	cmds, err := newTestClient(t, srv).GetUserCommands(context.Background(), UserCommandFilterInput{Address: "a", From: 0, To: 10})
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("want 2 commands, got %d", len(cmds))
+	}
+	if cmds[0].FailureReason != nil {
+		t.Errorf("applied command FailureReason = %q, want nil", *cmds[0].FailureReason)
+	}
+	if cmds[1].FailureReason == nil {
+		t.Error("failed-with-empty-reason FailureReason = nil, want a non-nil empty string")
+	} else if *cmds[1].FailureReason != "" {
+		t.Errorf("FailureReason = %q, want \"\"", *cmds[1].FailureReason)
+	}
+}
+
 // The nullable positions round-trip through encoding/json unchanged, so a
 // caller re-marshalling a decoded response does not turn nulls into zeroes.
 func TestNullablePositionsRoundTrip(t *testing.T) {

@@ -2,14 +2,17 @@
 // Node GraphQL API.
 //
 // The archive node indexes Mina blockchain history into a queryable
-// PostgreSQL store. This SDK exposes the five queries that the Archive-Node-API
-// GraphQL server publishes:
+// PostgreSQL store. This SDK exposes six of the queries that the
+// Archive-Node-API GraphQL server publishes:
 //
 //   - Events emitted by a zkApp account, filterable by block range and
 //     consensus status.
 //   - Actions dispatched from a zkApp account.
 //   - Verification-key updates — applied account updates that set a given
 //     verification key, within a required block range.
+//   - User commands — the payments and delegations of one account, within a
+//     required block range. Off unless the server sets
+//     ENABLE_USER_COMMANDS_QUERY=true.
 //   - Block details including transactions, by height/date range.
 //   - Network state — the archive's max canonical and pending block heights.
 //
@@ -45,4 +48,4 @@ package archive
 //
 // The module major equals the schema major: same major = compatible. A server
 // with a higher minor only adds features that this module may not wrap yet.
-const SchemaVersion = "2.0"
+const SchemaVersion = "2.1"

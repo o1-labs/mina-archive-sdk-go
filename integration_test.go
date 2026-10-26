@@ -15,6 +15,11 @@ const fixtureAddress = "B62qiaEMrWiYdK7LcJ2ScdMyG8LzUxi7yaw17XvBD34on7UKfhAkRML"
 // sample archive dump.
 const fixtureVerificationKeyHash = "330109536550383627416201330124291596191867681867265169258470531313815097966"
 
+// fixtureUserCommandAddress is public key id 66 in the upstream fixture: the
+// fee payer, source and receiver of all 61 user_commands rows, so the
+// UserCommands subtest asserts on content instead of skipping.
+const fixtureUserCommandAddress = "B62qrCV2xfWipHVW7KvdKSqXVqbTJLs4oNGhuDp8Ag34vy57mN4pcEi"
+
 // Fixture gap, measured against o1-labs/Archive-Node-API's
 // tests/integration/fixtures/archive_db.sql:
 //
@@ -24,6 +29,11 @@ const fixtureVerificationKeyHash = "33010953655038362741620133012429159619186768
 //     actions to return, for any address.
 //   - zkapp_verification_keys: 1 row, but 0 of 135 bodies set
 //     verification_key_hash_id, so no update applies a key.
+//   - user_commands: 61 rows, every one with public key 66 as fee payer,
+//     source and receiver (fixtureUserCommandAddress), linked to blocks
+//     through 101 blocks_user_commands rows. So UserCommands has data and
+//     asserts hard, provided the server runs with
+//     ENABLE_USER_COMMANDS_QUERY=true (integration.yml sets it).
 //
 // The Events, Actions and VerificationKeyUpdates subtests therefore Skip when
 // empty instead of failing. A skip is visible in CI output, unlike the
@@ -144,6 +154,40 @@ func TestIntegration(t *testing.T) {
 		}
 		if withBlockInfo == 0 {
 			t.Error("no action group carried a blockInfo")
+		}
+	})
+
+	t.Run("UserCommands", func(t *testing.T) {
+		cmds, err := client.GetUserCommands(ctx, UserCommandFilterInput{
+			Address: fixtureUserCommandAddress,
+			From:    1,
+			To:      1000,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Unlike the subtests above, the fixture has rows here: 61
+		// user_commands all involve this address. Empty is a failure, not a
+		// fixture gap — most likely the server was started without
+		// ENABLE_USER_COMMANDS_QUERY=true (which would surface as a
+		// GraphQLError above) or the fixture changed.
+		if len(cmds) == 0 {
+			t.Fatal("no user commands for the fixture address; the fixture has 61")
+		}
+		for _, c := range cmds {
+			if c.BlockInfo.Height <= 0 {
+				t.Errorf("blockInfo.height = %d, want > 0", c.BlockInfo.Height)
+			}
+			if c.FeePayer != fixtureUserCommandAddress && c.From != fixtureUserCommandAddress && c.To != fixtureUserCommandAddress {
+				t.Errorf("command %s does not involve the requested address (feePayer=%s from=%s to=%s)",
+					c.Hash, c.FeePayer, c.From, c.To)
+			}
+			if c.Kind != "payment" && c.Kind != "delegation" {
+				t.Errorf("kind = %q, want payment or delegation", c.Kind)
+			}
+			if c.Hash == "" {
+				t.Error("hash is empty")
+			}
 		}
 	})
 

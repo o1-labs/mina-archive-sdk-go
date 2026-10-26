@@ -82,6 +82,22 @@ type VerificationKeyUpdateFilterInput struct {
 	Status              BlockStatusFilter // optional ("" = server default)
 }
 
+// UserCommandFilterInput selects the user commands (payments and delegations)
+// of one account. A command matches when the account is its fee payer, its
+// source or its receiver.
+//
+// As with VerificationKeyUpdateFilterInput, the block range is required: the
+// server bounds the span by its configured BLOCK_RANGE_SIZE. From is inclusive
+// and To is exclusive. A range that holds more than the server's
+// USER_COMMAND_LIMIT commands for the account is rejected, so walk a busy
+// account in smaller pages.
+type UserCommandFilterInput struct {
+	Address string            // required
+	From    int               // required, inclusive
+	To      int               // required, exclusive
+	Status  BlockStatusFilter // optional ("" = server default)
+}
+
 // BlockQueryInput filters blocks by height, date, or canonical status.
 //
 // The date bounds must be ISO-8601. The server coerces them with JavaScript's
@@ -267,6 +283,34 @@ type UserCommand struct {
 	FailureReason *string `json:"failureReason"`
 }
 
+// UserCommandOutput is one row returned by GetUserCommands: a payment or a
+// stake delegation that involves the requested account, with the block that
+// carries it. A command that sits in several blocks of the result, such as two
+// competing pending blocks, is returned once for each block.
+//
+// Amount and Fee are nanomina decimal strings; parse with CurrencyFromGraphQL.
+type UserCommandOutput struct {
+	BlockInfo BlockInfo `json:"blockInfo"`
+	// SequenceNumber is the position of the command in its block.
+	SequenceNumber int    `json:"sequenceNumber"`
+	Hash           string `json:"hash"`
+	// Kind is "payment" or "delegation".
+	Kind     string `json:"kind"`
+	FeePayer string `json:"feePayer"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	// Amount is "0" for a delegation.
+	Amount string `json:"amount"`
+	Fee    string `json:"fee"`
+	Memo   string `json:"memo"`
+	Nonce  int    `json:"nonce"`
+	// Status is "applied" or "failed".
+	Status string `json:"status"`
+	// FailureReason is nullable in the SDL. nil means the command did not
+	// fail; a non-nil empty string means it failed with an empty reason.
+	FailureReason *string `json:"failureReason"`
+}
+
 // ZkAppCommand is a zkApp transaction inside a block.
 type ZkAppCommand struct {
 	Hash     string `json:"hash"`
@@ -385,6 +429,24 @@ func (in VerificationKeyUpdateFilterInput) toMap(queryName string) (map[string]a
 		"verificationKeyHash": in.VerificationKeyHash,
 		"from":                in.From,
 		"to":                  in.To,
+	}
+	if in.Status != "" {
+		m["status"] = string(in.Status)
+	}
+	return m, nil
+}
+
+func (in UserCommandFilterInput) toMap(queryName string) (map[string]any, error) {
+	if err := checkInt32(queryName, "from", in.From); err != nil {
+		return nil, err
+	}
+	if err := checkInt32(queryName, "to", in.To); err != nil {
+		return nil, err
+	}
+	m := map[string]any{
+		"address": in.Address,
+		"from":    in.From,
+		"to":      in.To,
 	}
 	if in.Status != "" {
 		m["status"] = string(in.Status)

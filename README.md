@@ -61,6 +61,7 @@ Each method on `*Client` maps 1:1 to a GraphQL query in the [Archive-Node-API sc
 | `GetNetworkState(ctx)` | `*NetworkStateOutput` | Archive's max canonical / pending block heights. |
 | `GetBlocks(ctx, opts)` | `[]Block` | Blocks filtered by height/date range and chain status. Transaction detail needs `ENABLE_BLOCK_TRANSACTION_DETAILS` on the server — see below. |
 | `GetVerificationKeyUpdates(ctx, in)` | `[]VerificationKeyUpdate` | Applied account updates that set a given verification key, within a required block range. |
+| `GetUserCommands(ctx, in)` | `[]UserCommandOutput` | Payments and delegations of one account (as fee payer, source or receiver), within a required block range. Needs `ENABLE_USER_COMMANDS_QUERY=true` on the server (schema 2.1). |
 | `ExecuteQuery(ctx, gql, vars, name)` | `json.RawMessage` | Low-level escape hatch returning the raw `data` field. |
 
 ### Block transaction detail
@@ -295,7 +296,7 @@ the command did not fail, a non-nil `""` means it failed with an empty reason.
 The module exports the schema version it speaks:
 
 ```go
-archive.SchemaVersion // "2.0" — the Archive-Node-API schema major.minor
+archive.SchemaVersion // "2.1" — the Archive-Node-API schema major.minor
 ```
 
 **The SDK major equals the server major. Same major = compatible.** A server
@@ -309,6 +310,14 @@ Within a major, the module version is semver about the SDK's own surface:
 | **Major** | Follows the server major: a breaking schema change. |
 | **Minor** | Additive: a new query, a new option, a new helper. |
 | **Patch** | Fixes, docs, dependencies. |
+
+### v2.1
+
+v2.1.0 speaks schema `2.1` and adds `GetUserCommands`. The query is off by
+default on the server: it needs `ENABLE_USER_COMMANDS_QUERY=true` on an
+Archive-Node-API 2.1.0 (or later) deployment, and a server without it answers
+with a `*GraphQLError` reading `Cannot query field "userCommands"`. Every other
+method is unchanged and keeps working against a 2.0 server.
 
 ### Migrating from v1 to v2
 
