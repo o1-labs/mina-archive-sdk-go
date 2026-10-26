@@ -466,6 +466,35 @@ func (c *Client) GetVerificationKeyUpdates(ctx context.Context, in VerificationK
 	return *result.VerificationKeyUpdates, nil
 }
 
+// GetUserCommands finds the user commands (payments and delegations) of one
+// account: every command whose fee payer, source or receiver is in.Address.
+// The block range is required and the server caps its width, so walk a wide
+// history in pages rather than in one call.
+//
+// The query is off by default upstream: it exists only when the server sets
+// ENABLE_USER_COMMANDS_QUERY=true. A stock server answers with a *GraphQLError
+// whose message is `Cannot query field "userCommands" on type "Query"`.
+func (c *Client) GetUserCommands(ctx context.Context, in UserCommandFilterInput) ([]UserCommandOutput, error) {
+	input, err := in.toMap("GetUserCommands")
+	if err != nil {
+		return nil, err
+	}
+	data, err := c.ExecuteQuery(ctx, queryUserCommands, map[string]any{"input": input}, "GetUserCommands")
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		UserCommands *[]UserCommandOutput `json:"userCommands"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, &DecodeError{QueryName: "GetUserCommands", Body: truncate(string(data), 200), Err: err}
+	}
+	if result.UserCommands == nil {
+		return nil, &MissingFieldError{QueryName: "GetUserCommands", Field: "userCommands"}
+	}
+	return *result.UserCommands, nil
+}
+
 // IntPtr / BoolPtr are convenience helpers for the optional pointer fields
 // on filter structs. They avoid the `x := 5; &x` ceremony in call sites.
 func IntPtr(v int) *int    { return &v }

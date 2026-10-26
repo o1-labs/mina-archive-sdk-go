@@ -229,6 +229,112 @@ func TestVerificationKeyFilterSendsRequiredRange(t *testing.T) {
 	}
 }
 
+func TestGetUserCommandsHappyPath(t *testing.T) {
+	srv := httptest.NewServer(graphqlOK(map[string]any{
+		"userCommands": []any{
+			map[string]any{
+				"blockInfo": map[string]any{
+					"height":                     100,
+					"stateHash":                  "sh",
+					"parentHash":                 "ph",
+					"ledgerHash":                 "lh",
+					"chainStatus":                "canonical",
+					"timestamp":                  "0",
+					"globalSlotSinceHardfork":    0,
+					"globalSlotSinceGenesis":     0,
+					"distanceFromMaxBlockHeight": 1,
+				},
+				"sequenceNumber": 3,
+				"hash":           "5Jtest",
+				"kind":           "payment",
+				"feePayer":       "B62qtest",
+				"from":           "B62qtest",
+				"to":             "B62qother",
+				"amount":         "1000000000",
+				"fee":            "250000000",
+				"memo":           "",
+				"nonce":          7,
+				"status":         "applied",
+				"failureReason":  nil,
+			},
+		},
+	}))
+	defer srv.Close()
+	client := newTestClient(t, srv)
+
+	cmds, err := client.GetUserCommands(context.Background(), UserCommandFilterInput{
+		Address: "B62qtest",
+		From:    1,
+		To:      1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("len = %d, want 1", len(cmds))
+	}
+	c := cmds[0]
+	if c.BlockInfo.Height != 100 {
+		t.Errorf("blockInfo.height = %d, want 100", c.BlockInfo.Height)
+	}
+	if c.SequenceNumber != 3 || c.Nonce != 7 {
+		t.Errorf("sequenceNumber/nonce = %d/%d, want 3/7", c.SequenceNumber, c.Nonce)
+	}
+	if c.Kind != "payment" || c.FeePayer != "B62qtest" || c.To != "B62qother" {
+		t.Errorf("unexpected row: %+v", c)
+	}
+	if c.FailureReason != nil {
+		t.Errorf("applied command FailureReason = %q, want nil", *c.FailureReason)
+	}
+}
+
+func TestUserCommandFilterSendsRequiredRange(t *testing.T) {
+	var captured map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body graphqlRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		captured = body.Variables
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"userCommands": []any{}},
+		})
+	}))
+	defer srv.Close()
+	client := newTestClient(t, srv)
+
+	if _, err := client.GetUserCommands(context.Background(), UserCommandFilterInput{
+		Address: "B62q",
+		From:    10,
+		To:      20,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input, ok := captured["input"].(map[string]any)
+	if !ok {
+		t.Fatalf("input variable missing or not an object: %v", captured)
+	}
+	if input["address"] != "B62q" {
+		t.Errorf("address = %v", input["address"])
+	}
+	// The range is required, so it is sent even at the zero value of Status.
+	if input["from"] != float64(10) || input["to"] != float64(20) {
+		t.Errorf("range = %v..%v, want 10..20", input["from"], input["to"])
+	}
+	if _, present := input["status"]; present {
+		t.Error("status should be omitted when unset")
+	}
+
+	// A status, when set, is sent as the enum literal.
+	if _, err := client.GetUserCommands(context.Background(), UserCommandFilterInput{
+		Address: "B62q", From: 1, To: 2, Status: BlockStatusCanonical,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := captured["input"].(map[string]any)["status"]; got != "CANONICAL" {
+		t.Errorf("status = %v, want CANONICAL", got)
+	}
+}
+
 func TestGraphQLErrorIsNotRetried(t *testing.T) {
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

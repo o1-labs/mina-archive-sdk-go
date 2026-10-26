@@ -80,6 +80,9 @@ jobs:
           # Off by default upstream, which left the block-transaction decode
           # path completely uncovered and the README's claim unverified (#7).
           ENABLE_BLOCK_TRANSACTION_DETAILS: 'true'
+          # Off by default upstream too; without it the userCommands query is
+          # absent from the served schema and GetUserCommands cannot be tested.
+          ENABLE_USER_COMMANDS_QUERY: 'true'
         run: |
           npm ci
           npm run build
